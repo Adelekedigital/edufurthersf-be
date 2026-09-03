@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
+
+# The technical design fixes the branch-coverage floor at 85%.
+COVERAGE_FLOOR = 85
 
 
 def run(command: list[str]) -> int:
@@ -15,8 +19,22 @@ def run(command: list[str]) -> int:
 def main() -> int:
     checks = [
         [sys.executable, "-m", "compileall", "-q", "src", "migrations", "tests"],
-        [sys.executable, "-m", "pytest", "-q"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--cov=src/app",
+            "--cov-branch",
+            "--cov-report=term-missing:skip-covered",
+            f"--cov-fail-under={COVERAGE_FLOOR}",
+        ],
     ]
+    if os.environ.get("SKIP_DB_TESTS") == "1":
+        print(
+            "WARNING: SKIP_DB_TESTS=1 - database integration tests are skipped. "
+            "This is not a full pass and must not be used to clear a release gate."
+        )
     optional_tools = [
         ("ruff", ["ruff", "check", "src", "tests", "migrations", "scripts"]),
         ("mypy", ["mypy", "src"]),

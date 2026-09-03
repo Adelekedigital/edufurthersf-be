@@ -1,4 +1,4 @@
-﻿name: Quality gate
+name: Quality gate
 
 on:
   push:
@@ -7,6 +7,29 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+
+    # The gate runs against real PostgreSQL. Several defects reachable in
+    # production - a column type the ORM and migration disagreed on, a request
+    # that never committed - are invisible to tests that only exercise pure
+    # functions, so a run without this service is not a pass.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: scholarship_finder_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d scholarship_finder_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/scholarship_finder_test
+
     steps:
       # Gitleaks scans commit ranges, so it needs full repository history.
       - uses: actions/checkout@v6
@@ -17,11 +40,12 @@ jobs:
           enable-cache: true
       - run: uv python install 3.14
       - run: uv sync --group dev
+      - name: Apply migrations to the test database
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: uv run alembic upgrade head
       - run: uv run python scripts/check.py
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-

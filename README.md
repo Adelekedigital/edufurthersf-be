@@ -70,11 +70,32 @@ local runs that QStash reaches directly may leave it unset.
 
 ### Rate limiting
 
-The current anonymous search limiter is process-local and keys on the client IP,
-which the deployment image resolves by trusting the platform proxy's
-`X-Forwarded-For` (`FORWARDED_ALLOW_IPS`). It is suitable for local development or
-a single API instance. Before running multiple instances, use a
+The anonymous search limiter is process-local and keys on the client IP, which the
+deployment image resolves by trusting `X-Forwarded-For` only from the platform
+proxy's own network (`FORWARDED_ALLOW_IPS=100.64.0.0/10`). It must not key on the
+session cookie: an anonymous caller chooses that value and could mint a fresh
+bucket per request. Suitable for local development or a single API instance;
+before running multiple instances, use a platform-level limiter or a shared store. Before running multiple instances, use a
 Railway/platform-level limiter or replace it with a shared-store implementation.
+
+## Tests
+
+The suite includes integration tests that run against a real PostgreSQL database,
+because the defects that reach production are the ones pure functions cannot show:
+a column type the ORM and the migration disagree on, or a request that never
+commits. Start a disposable database and point `TEST_DATABASE_URL` at it:
+
+```powershell
+docker run -d --name finder-test -e POSTGRES_DB=scholarship_finder_test `
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 55433:5432 postgres:16-alpine
+$env:DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:55433/scholarship_finder_test"
+uv run alembic upgrade head
+uv run python scripts/check.py
+```
+
+`scripts/check.py` enforces an 85% branch-coverage floor. `SKIP_DB_TESTS=1` skips
+the database tests and prints a warning; a run with them skipped is not a full
+pass and does not clear a release gate.
 
 ## Database migrations
 

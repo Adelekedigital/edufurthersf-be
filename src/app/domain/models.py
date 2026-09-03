@@ -61,8 +61,19 @@ class Scholarship(TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(500))
     official_home_url: Mapped[str] = mapped_column(Text)
+    # The migration stores this as VARCHAR. A native PG enum would bind as
+    # `$1::recordstate`, a type no migration ever created, so every query
+    # filtering on it failed. Keep the Python enum, store it as text.
     lifecycle_state: Mapped[RecordState] = mapped_column(
-        Enum(RecordState), default=RecordState.needs_review
+        Enum(
+            RecordState,
+            native_enum=False,
+            length=30,
+            create_constraint=True,
+            name="ck_scholarships_lifecycle_state",
+            validate_strings=True,
+        ),
+        default=RecordState.needs_review,
     )
     current_published_revision_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
@@ -83,7 +94,16 @@ class ScholarshipCycle(TimestampMixin, Base):
     provider_cycle_key: Mapped[str] = mapped_column(String(255))
     applicant_segment: Mapped[str] = mapped_column(String(255), default="default")
     official_cycle_url: Mapped[str] = mapped_column(Text)
-    public_status: Mapped[PublicStatus] = mapped_column(Enum(PublicStatus))
+    public_status: Mapped[PublicStatus] = mapped_column(
+        Enum(
+            PublicStatus,
+            native_enum=False,
+            length=40,
+            create_constraint=True,
+            name="ck_scholarship_cycles_public_status",
+            validate_strings=True,
+        )
+    )
     status_valid_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
