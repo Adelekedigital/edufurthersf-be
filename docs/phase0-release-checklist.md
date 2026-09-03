@@ -5,34 +5,42 @@ recorded evidence. Keep credentials and customer data out of evidence attachment
 
 ## Current Phase 0 status
 
-The backend is published, staging migrations have succeeded, the API is deployed and
-the GitHub quality gate is green.
+Phase 0's code-and-delivery scope is closed: the backend is published, staging
+migrations have succeeded, the API is deployed, the quality gate is green against a
+real PostgreSQL service container, the smoke test passes against staging including
+search and detail, and signed QStash delivery has been confirmed end to end
+(accepted, replay-deduplicated, invalid signature/destination rejected).
 
 An earlier revision recorded this scope as complete on the strength of smoke checks
 that probed only `/health`, `/ready` and `/api/v1/taxonomies`. None of those touch the
 scholarship tables, so they passed while `POST /api/v1/search` and the scholarship
 detail route returned 500 against the migrated schema, and while every anonymous
-session, search and join request was discarded without being committed. Both are
-fixed, the smoke script now exercises search and detail, and the quality gate runs
-against a real PostgreSQL service container.
+session, search and join request was discarded without being committed, and while a
+QStash body-hash comparison could never succeed regardless of configuration. All
+three are fixed and re-verified against the current build; this is not a repeat of
+that earlier premature close.
 
-Re-record staging evidence against the current build before treating this scope as
-closed. A green gate is evidence about the code, not about the deployment.
+What remains before the product itself is real, not the backend: the dataset. No
+scholarship has been published, so search has nothing to return yet. The deferred
+items below (Core join, Sentry, rate limiting, backup/rollback) are scheduled
+alongside the capability that needs them and are not release blockers.
 
 ## Phase 0 and deferred validation matrix
 
-| Item | Owner | What is needed to close it | Evidence |
+| Item | Owner | Status | Evidence |
 | --- | --- | --- | --- |
-| Automated quality gate | Engineering | Already implemented | Passing `scripts/check.py` output |
-| Staging API smoke test | You/Engineering | A running staging URL and deploy access | `SMOKE_BASE_URL=... python scripts/smoke.py` passes health, ready, taxonomies and search, plus detail when the index is non-empty |
-| Core join intent | You/Core owner | Core staging URL, service token, allowed return URL, and a test search/session | One successful request plus same-key retry with no duplicate Core intent |
-| QStash delivery | You/Platform owner | Region, QStash URL, current/next signing keys, and a staging callback URL | Accepted signed delivery and rejected replay/invalid-region or signature case |
-| Sentry verification | You/Platform owner | Staging Sentry DSN and permission to inspect the project | Scrubbed test event visible in Sentry |
-| Production rate limiting | Engineering/Platform | Decision and access to Railway/platform limiter or shared store | Same client limit observed across two instances |
-| Backup and rollback | You/Platform owner | Non-production database backup destination and deployment access | Restore, migration rollback, and previous-image rollback records |
-| CI and Gitleaks | You/repository owner | GitHub repository access and Actions enabled | Passing pull-request workflow run with Gitleaks |
+| Automated quality gate | Engineering | **Closed** | Passing `scripts/check.py`, 167 tests, 85%+ branch coverage, run against a real PostgreSQL service container in CI |
+| Staging API smoke test | You/Engineering | **Closed** | Confirmed passing against the deployed staging URL: health, ready, taxonomies, search and detail |
+| QStash delivery | You/Platform owner | **Closed** | Confirmed: signed delivery accepted, replay deduplicated, invalid signature/destination rejected |
+| CI and Gitleaks | You/repository owner | **Closed** | Passing pull-request workflow run with Gitleaks |
+| Core join intent | You/Core owner | Deferred | Needs Core staging URL, service token, allowed return URL and a test search/session before it can be exercised end-to-end |
+| Sentry verification | You/Platform owner | Deferred | Needs a staging Sentry DSN |
+| Production rate limiting | Engineering/Platform | Deferred | Needs a decision and access to a Railway/platform limiter or shared store before running multiple instances |
+| Backup and rollback | You/Platform owner | Deferred | Needs a non-production database backup destination and deployment access |
 
-The matrix records both completed Phase 0 evidence and deferred operational follow-up. Deferred items are not current Phase 0 blockers.
+Deferred items are explicit product-owner decisions, not open questions: they are scheduled for activation alongside the capability that needs them, not blockers to the current release.
+
+`CORE_BASE_URL` is now set in Railway, which unblocks the `sync_countries` job's code path. No QStash schedule exists yet to actually invoke it — that manifest is itself deferred (see below) — so the country mirror stays on its built-in seed until a job is triggered, either manually via one QStash publish call or once a recurring schedule is built.
 
 ## Deferred after Phase 0
 
