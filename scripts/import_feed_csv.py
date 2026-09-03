@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import time
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
@@ -186,8 +187,18 @@ def main() -> int:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=200,
+        # Each row is several sequential DB round trips (source/page lookup,
+        # discovery lookup, insert, two job inserts), so a 200-row batch over a
+        # real network hop can comfortably exceed a 60s client timeout on the
+        # very first request - a smaller default is safer than the server's cap.
+        default=50,
         help=f"Rows per API call, up to the server's cap of {API_BATCH_CAP}",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="Seconds to wait for one batch's response",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate the file only; send nothing"
@@ -238,16 +249,28 @@ def main() -> int:
         return 1
 
     totals = {"imported": 0, "repeated": 0, "changed": 0, "rejected": 0}
+    total_batches = -(-len(records) // batch_size)
     url = args.base_url.rstrip("/") + "/api/v1/internal/import/feed"
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=args.timeout) as client:
         for index, batch in enumerate(_batches(records, batch_size), start=1):
             payload: dict[str, Any] = {
                 "records": [record.model_dump(mode="json") for record in batch]
             }
-            response = client.post(url, json=payload, headers={"X-Service-Token": args.token})
+            print(f"batch {index}/{total_batches}: sending {len(batch)} rows...", flush=True)
+            started = time.monotonic()
+            try:
+                response = client.post(url, json=payload, headers={"X-Service-Token": args.token})
+            except httpx.TimeoutException:
+                elapsed = time.monotonic() - started
+                print(
+                    f"FAIL batch {index}: no response within {elapsed:.0f}s "
+                    f"(--timeout={args.timeout:.0f}s). Try a smaller --batch-size."
+                )
+                return 1
+            elapsed = time.monotonic() - started
             if response.status_code != 200:
                 print(
-                    f"FAIL batch {index} ({len(batch)} rows): "
+                    f"FAIL batch {index} ({len(batch)} rows, {elapsed:.1f}s): "
                     f"HTTP {response.status_code} {response.text[:500]}"
                 )
                 return 1
@@ -255,9 +278,10 @@ def main() -> int:
             for key in totals:
                 totals[key] += body[key]
             print(
-                f"batch {index}: {len(batch)} rows -> imported={body['imported']} "
-                f"repeated={body['repeated']} changed={body['changed']} "
-                f"rejected={body['rejected']} crawl_run_id={body['crawl_run_id']}"
+                f"batch {index}/{total_batches} done in {elapsed:.1f}s: "
+                f"imported={body['imported']} repeated={body['repeated']} "
+                f"changed={body['changed']} rejected={body['rejected']} "
+                f"crawl_run_id={body['crawl_run_id']}"
             )
 
     print(
