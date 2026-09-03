@@ -1,4 +1,4 @@
-name: Quality gate
+﻿name: Quality gate
 
 on:
   push:
@@ -8,7 +8,10 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
+      # Gitleaks scans commit ranges, so it needs full repository history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -19,4 +22,3 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
