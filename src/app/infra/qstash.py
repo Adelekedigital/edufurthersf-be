@@ -60,7 +60,11 @@ class QStashVerifier:
     def __init__(self, config: QStashVerificationConfig) -> None:
         self.config = config
 
-    def verify(self, *, raw_body: bytes, signature: str | None, destination: str) -> bool:
+    def verify(self, *, raw_body: bytes, signature: str | None) -> bool:
+        # The destination comes from configuration, not from the reconstructed
+        # request URL: behind a platform proxy the app sees the forwarded
+        # http:// scheme and internal host, which never match the signed `sub`.
+        destination = self.config.expected_destination
         # Verify the exact raw body; re-serializing JSON can change its hash.
         if not (
             jwt
@@ -68,9 +72,8 @@ class QStashVerifier:
             and self.config.next_signing_key
             and signature
             and raw_body
+            and destination
         ):
-            return False
-        if destination != self.config.expected_destination:
             return False
         # QStash encodes the SHA-256 digest as URL-safe base64 in `body`.
         body_hash = base64.urlsafe_b64encode(hashlib.sha256(raw_body).digest()).decode().rstrip("=")
