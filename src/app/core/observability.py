@@ -3,6 +3,20 @@ import logging
 import uuid
 from time import perf_counter
 
+# Structured fields a log call may attach via `extra`; anything else is dropped
+# so an unreviewed value cannot leak into logs by accident.
+_EXTRA_FIELDS = (
+    "request_id",
+    "method",
+    "path",
+    "duration_ms",
+    "status_code",
+    "reason",
+    "expected_destination",
+    "signed_destination",
+    "job_kind",
+)
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -12,11 +26,7 @@ class JsonFormatter(logging.Formatter):
                 "message": record.getMessage(),
                 "logger": record.name,
                 "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
-                **{
-                    key: getattr(record, key)
-                    for key in ("request_id", "method", "path", "duration_ms", "status_code")
-                    if hasattr(record, key)
-                },
+                **{key: getattr(record, key) for key in _EXTRA_FIELDS if hasattr(record, key)},
             },
             ensure_ascii=False,
         )

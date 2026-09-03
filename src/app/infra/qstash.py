@@ -1,5 +1,7 @@
 import base64
+import binascii
 import hashlib
+import hmac
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,37 @@ class QStashVerificationConfig:
     current_signing_key: str | None
     next_signing_key: str | None
     expected_destination: str
+
+
+@dataclass(frozen=True)
+class QStashVerificationResult:
+    """Verification outcome plus a stable reason code for operator logs.
+
+    The reason never reaches the caller: a rejected delivery always gets a
+    generic 401 so an unauthenticated client cannot probe the configuration.
+    """
+
+    ok: bool
+    reason: str
+    signed_destination: str | None = None
+
+
+def decode_body_claim(value: str) -> bytes | None:
+    """Return the raw digest from QStash's `body` claim.
+
+    QStash sends the SHA-256 digest as base64. A 32-byte digest always carries
+    one `=` of padding, and encoders differ on the URL-safe alphabet, so decode
+    to bytes and compare digests rather than comparing encoded strings.
+    """
+    padded = value + "=" * (-len(value) % 4)
+    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
+        try:
+            digest = decoder(padded)
+        except ValueError, binascii.Error:
+            continue
+        if len(digest) == hashlib.sha256().digest_size:
+            return digest
+    return None
 
 
 def publish_url(qstash_url: str) -> str:
@@ -60,23 +93,23 @@ class QStashVerifier:
     def __init__(self, config: QStashVerificationConfig) -> None:
         self.config = config
 
-    def verify(self, *, raw_body: bytes, signature: str | None) -> bool:
+    def verify(self, *, raw_body: bytes, signature: str | None) -> QStashVerificationResult:
         # The destination comes from configuration, not from the reconstructed
         # request URL: behind a platform proxy the app sees the forwarded
         # http:// scheme and internal host, which never match the signed `sub`.
         destination = self.config.expected_destination
-        # Verify the exact raw body; re-serializing JSON can change its hash.
-        if not (
-            jwt
-            and self.config.current_signing_key
-            and self.config.next_signing_key
-            and signature
-            and raw_body
-            and destination
-        ):
-            return False
-        # QStash encodes the SHA-256 digest as URL-safe base64 in `body`.
-        body_hash = base64.urlsafe_b64encode(hashlib.sha256(raw_body).digest()).decode().rstrip("=")
+        if not (jwt and self.config.current_signing_key and self.config.next_signing_key):
+            return QStashVerificationResult(False, "signing_keys_not_configured")
+        if not destination:
+            return QStashVerificationResult(False, "expected_destination_not_configured")
+        if not signature:
+            return QStashVerificationResult(False, "missing_upstash_signature_header")
+        if not raw_body:
+            return QStashVerificationResult(False, "empty_request_body")
+        # Hash the exact raw body; re-serializing JSON can change its digest.
+        expected_digest = hashlib.sha256(raw_body).digest()
+        reason = "signature_not_issued_by_a_configured_signing_key"
+        signed_destination: str | None = None
         for key in (self.config.current_signing_key, self.config.next_signing_key):
             try:
                 claims = jwt.decode(
@@ -85,15 +118,30 @@ class QStashVerifier:
                     algorithms=["HS256"],
                     options={"require": ["iss", "sub", "exp", "nbf", "body"]},
                 )
-                if (
-                    claims.get("iss") == "Upstash"
-                    and claims.get("sub") == destination
-                    and claims.get("body") == body_hash
-                ):
-                    return True
+            except jwt.ExpiredSignatureError:
+                reason = "signature_expired"
+                continue
+            except jwt.ImmatureSignatureError:
+                reason = "signature_not_yet_valid"
+                continue
+            except jwt.MissingRequiredClaimError:
+                reason = "signature_missing_required_claim"
+                continue
             except jwt.PyJWTError:
                 continue
-        return False
+            if claims.get("iss") != "Upstash":
+                reason = "unexpected_issuer"
+                continue
+            if claims.get("sub") != destination:
+                reason = "destination_mismatch"
+                signed_destination = str(claims.get("sub"))
+                continue
+            digest = decode_body_claim(str(claims.get("body", "")))
+            if digest is None or not hmac.compare_digest(digest, expected_digest):
+                reason = "body_hash_mismatch"
+                continue
+            return QStashVerificationResult(True, "verified")
+        return QStashVerificationResult(False, reason, signed_destination)
 
 
 ALLOWED_JOB_KINDS = frozenset(
