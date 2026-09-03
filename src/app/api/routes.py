@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Literal, cast
@@ -38,6 +39,7 @@ from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStash
 from app.infra.reviews import decide_review
 from app.infra.sessions import get_or_create_session, record_search
 
+logger = logging.getLogger("app.api")
 router = APIRouter()
 search_limiter = InMemoryRateLimiter()
 
@@ -88,7 +90,21 @@ async def _verified_job_body(request: Request, destination: str) -> bytes:
             destination,
         )
     )
-    if not verifier.verify(raw_body=raw_body, signature=request.headers.get("Upstash-Signature")):
+    result = verifier.verify(raw_body=raw_body, signature=request.headers.get("Upstash-Signature"))
+    if not result.ok:
+        # The client only ever sees a generic 401; the reason goes to the
+        # operator log so a misconfigured destination or key is diagnosable
+        # without probing the endpoint. Destinations are public URLs, not
+        # secrets, so logging the mismatch is safe.
+        logger.warning(
+            "qstash_signature_rejected",
+            extra={
+                "request_id": getattr(request.state, "request_id", ""),
+                "reason": result.reason,
+                "expected_destination": destination,
+                "signed_destination": result.signed_destination or "",
+            },
+        )
         raise HTTPException(status_code=401, detail="Invalid QStash signature")
     return raw_body
 
