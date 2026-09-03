@@ -1,0 +1,35 @@
+name: Database migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment whose DATABASE_URL should be migrated
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrations-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.14
+      - run: uv sync --locked --no-dev
+      - name: Apply Alembic migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run alembic upgrade head
