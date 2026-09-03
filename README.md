@@ -53,9 +53,38 @@ Every call opens one `CrawlRun` and every row lands in exactly one bucket:
 The response carries the run's `crawl_run_id` alongside the four counts, and every
 `ProcessingJob` the import enqueues records that id as its `correlation_id`.
 
+Every new or changed row enqueues both a `normalize_discovery` job and a
+`link_canonical` job. The second one matters as much as it sounds trivial:
+without it nothing would ever call `link_discovery` for a freshly imported row,
+which would sit at `processing_state=normalized` forever, invisible to any
+reviewer, no matter how many rows import successfully.
+
+`link_canonical` resolves a discovery to `linked` (exactly one existing
+scholarship shares its name), `needs_review` (more than one candidate — an
+ambiguity a reviewer must resolve before anything auto-links), or
+`new_candidate` (no existing match). Against a young or empty catalogue,
+`new_candidate` is the overwhelming majority outcome, and it opens a
+`ReviewTask` exactly like `needs_review` does — a brand-new identity is still a
+decision only a reviewer can make.
+
 Before importing, a `Source` must exist: `POST /internal/admin/sources` (`name`,
 `source_type`, an A–D `authority_grade`, `approved_domains`, `active`); `GET
 /internal/admin/sources` lists what is registered.
+
+### Bulk import from a CSV export
+
+```powershell
+uv run python scripts/import_feed_csv.py export.csv --source-id <uuid> `
+  --base-url https://your-staging-url --token $env:INTERNAL_SERVICE_TOKEN
+```
+
+Every row is validated locally against the same contract the API enforces before
+anything is sent. This matters specifically because the import endpoint validates
+up to 500 records as one request: a single row with a blank Link or a non-http(s)
+URL would otherwise reject the *entire* batch, not just that row. Rows failing
+local validation are reported and skipped; only the survivors are sent, in batches
+under the API's own 500-row cap. Add `--dry-run` to validate a file — useful for a
+first pass over a new export — without sending anything.
 
 ## Review and publication
 

@@ -75,11 +75,14 @@ async def test_reimport_is_non_destructive(db) -> None:
     assert len(list(await db.scalars(select(Discovery)))) == 1
 
 
-async def test_import_enqueues_one_normalisation_job_per_discovery(db) -> None:
+async def test_import_enqueues_normalisation_and_linking_for_each_discovery(db) -> None:
+    """Without a link_canonical job too, nothing would ever call
+    link_discovery for a freshly imported row - it would sit normalized
+    forever no matter how many rows are imported."""
     source = await _source(db)
     await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
     jobs = list(await db.scalars(select(ProcessingJob)))
-    assert [job.kind for job in jobs] == ["normalize_discovery"]
+    assert sorted(job.kind for job in jobs) == ["link_canonical", "normalize_discovery"]
 
 
 async def test_worker_normalises_a_discovery(db) -> None:
@@ -137,10 +140,20 @@ async def test_ambiguous_link_opens_a_review_task_instead_of_guessing(db) -> Non
 
 
 async def test_unmatched_discovery_becomes_a_new_candidate(db) -> None:
+    """Against an empty catalogue this is the outcome nearly every discovery
+    gets, so it must still reach the reviewer - new_candidate has no other
+    path into the queue."""
     source = await _source(db)
     await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
     discovery = await db.scalar(select(Discovery))
     assert await link_discovery(db, discovery.discovery_id) == LinkOutcome.new_candidate
+
+    task = await db.scalar(
+        select(ReviewTask).where(ReviewTask.discovery_id == discovery.discovery_id)
+    )
+    assert task is not None
+    assert task.reason == "no_identity_candidate"
+    assert task.state == "open"
 
 
 async def test_review_approval_creates_an_unpublished_scholarship(db) -> None:
@@ -196,3 +209,38 @@ async def test_approval_without_the_required_fields_is_refused(db) -> None:
         await decide_review(
             db, task.review_task_id, ReviewDecisionRequest(decision="approve", reason="Looks fine")
         )
+
+
+async def test_the_full_chain_from_import_to_approval_works_unassisted(db) -> None:
+    """Import, then only the jobs import itself queued, run through the same
+    worker QStash would dispatch to - no test setup hand-creates a ReviewTask
+    or calls link_discovery directly the way the others above deliberately do.
+    This is what actually happens to a real imported row."""
+    source = await _source(db)
+    provider = Provider(name="Provider", approved_domains=["example.test"])
+    db.add(provider)
+    await db.flush()
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
+    discovery = await db.scalar(select(Discovery))
+
+    for job in list(await db.scalars(select(ProcessingJob))):
+        assert await execute_job(db, job.job_id) == "completed"
+
+    task = await db.scalar(
+        select(ReviewTask).where(ReviewTask.discovery_id == discovery.discovery_id)
+    )
+    assert task is not None, "the worker alone must be able to take a row to review"
+
+    scholarship_id = await decide_review(
+        db,
+        task.review_task_id,
+        ReviewDecisionRequest(
+            decision="approve",
+            reason="Official evidence checked",
+            provider_id=provider.provider_id,
+            slug="award-a",
+            official_home_url="https://example.test/award",
+            canonical_name="Award A",
+        ),
+    )
+    assert scholarship_id is not None
