@@ -1,9 +1,15 @@
-# Phase 0 release checklist
+﻿# Phase 0 release checklist
 
 Phase 0 is complete only when the code checks and the environment checks below have
 recorded evidence. Keep credentials and customer data out of evidence attachments.
 
-## Completion matrix
+## Current Phase 0 status
+
+The current Phase 0 scope is complete: the backend is published, staging migrations
+have succeeded, the API is deployed, staging smoke checks pass, and the GitHub quality
+gate is green.
+
+## Phase 0 and deferred validation matrix
 
 | Item | Owner | What is needed to close it | Evidence |
 | --- | --- | --- | --- |
@@ -16,10 +22,19 @@ recorded evidence. Keep credentials and customer data out of evidence attachment
 | Backup and rollback | You/Platform owner | Non-production database backup destination and deployment access | Restore, migration rollback, and previous-image rollback records |
 | CI and Gitleaks | You/repository owner | GitHub repository access and Actions enabled | Passing pull-request workflow run with Gitleaks |
 
-Only the rows marked “You/…” require your access or credentials. The remaining
-engineering work can continue without secrets, but those rows cannot be honestly
-marked complete until the corresponding external evidence exists.
+The matrix records both completed Phase 0 evidence and deferred operational follow-up. Deferred items are not current Phase 0 blockers.
 
+## Deferred after Phase 0
+
+These items are intentionally deferred and should be scheduled when their related
+capability is activated:
+
+- Production migration and production smoke test.
+- Supabase backup/restore drill; the current staging database is on the Free plan.
+- QStash schedules and production delivery validation.
+- Core join-intent integration.
+- Sentry project configuration and event verification.
+- Shared/platform rate limiting before running multiple API replicas.
 ## Automated checks
 
 Run from the repository root:
@@ -99,3 +114,7 @@ across two instances.
 Confirm the remote GitHub Actions workflow passes on a pull request, including Gitleaks.
 Confirm the deployment process runs migrations as an explicit release step and that a
 previous image can be rolled back.
+
+
+
+
