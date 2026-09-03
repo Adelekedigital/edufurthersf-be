@@ -2,7 +2,6 @@ import base64
 import hashlib
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -40,7 +39,7 @@ class QStashPublisher:
         headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
         if deduplication_id:
             headers["Upstash-Deduplication-Id"] = deduplication_id
-        url = f"{publish_url(self.qstash_url)}/{quote(destination, safe='')}"
+        url = f"{publish_url(self.qstash_url)}/{destination}"
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(url, json=body, headers=headers)
             response.raise_for_status()
