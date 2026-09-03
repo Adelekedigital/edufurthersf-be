@@ -53,6 +53,31 @@ Every call opens one `CrawlRun` and every row lands in exactly one bucket:
 The response carries the run's `crawl_run_id` alongside the four counts, and every
 `ProcessingJob` the import enqueues records that id as its `correlation_id`.
 
+Before importing, a `Source` must exist: `POST /internal/admin/sources` (`name`,
+`source_type`, an A–D `authority_grade`, `approved_domains`, `active`); `GET
+/internal/admin/sources` lists what is registered.
+
+## Review and publication
+
+A record becomes public in two separate reviewer actions, matching the design's
+`APPROVED -> PUBLISHED` state machine:
+
+- `POST /internal/admin/reviews/{id}/decision` (`decision: approve`) creates the
+  `Scholarship`, still at `lifecycle_state=needs_review` — this is linking a
+  canonical identity, not publishing it.
+- `POST /internal/admin/scholarships/{id}/publish` creates one `ScholarshipCycle`
+  with the cycle's facts (destinations, levels, origin/field eligibility, funding
+  evidence, deadline) and flips `lifecycle_state` to `published`. Destinations are
+  validated against verified coverage, the same vocabulary search itself uses;
+  levels and fields against the taxonomy. A scholarship may receive further
+  cycles once published — a new intake is not a reason to unpublish the last one
+  — but a withdrawn scholarship refuses new cycles until explicitly reactivated.
+
+Evidence behind a published fact is asserted by the reviewer in the publish
+request (`evidence_fresh`) rather than independently recorded per claim today.
+Formal per-claim `verifications`/`verification_evidence` linkage, which the data
+standard's 100%-evidence-compliance gate ultimately needs, is deferred.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for local configuration. The database URL must use the

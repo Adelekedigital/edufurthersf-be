@@ -17,6 +17,8 @@ from app.api.ingestion_schemas import FeedImportRequest, FeedImportResponse
 from app.api.job_schemas import JobRequest, JobResponse
 from app.api.join_schemas import JoinIntentRequest, JoinIntentResponse
 from app.api.review_schemas import (
+    PublishCycleRequest,
+    PublishCycleResponse,
     ReviewDecisionRequest,
     ReviewDecisionResponse,
     ReviewQueueResponse,
@@ -32,6 +34,7 @@ from app.api.schemas import (
     TaxonomiesResponse,
     TaxonomyItem,
 )
+from app.api.source_schemas import SourceCreateRequest, SourceListResponse, SourceRead
 from app.core.config import get_settings
 from app.core.cursors import decode_cursor, encode_cursor
 from app.core.ids import new_uuid7
@@ -40,12 +43,15 @@ from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
 from app.domain.models import (
     Discovery,
     JoinRequest,
+    PublicStatus,
     RecordState,
     ReviewTask,
     Scholarship,
     ScholarshipCycle,
     Search,
+    Source,
 )
+from app.domain.publication import build_cycle_facts
 from app.domain.return_urls import is_allowed_return_url
 from app.domain.snapshots import build_result_snapshot
 from app.domain.status import evaluate_public_status
@@ -56,6 +62,7 @@ from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import enqueue_job
 from app.infra.outbox import enqueue_analytics_event
+from app.infra.publication import publish_cycle
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
 from app.infra.sessions import (
@@ -64,6 +71,7 @@ from app.infra.sessions import (
     get_or_create_session,
     record_search_response,
 )
+from app.infra.sources import create_source, list_sources
 from app.infra.withdrawals import withdraw_scholarship
 
 logger = logging.getLogger("app.api")
@@ -106,6 +114,40 @@ async def import_feed(
         changed=outcome.changed,
         rejected=outcome.rejected,
     )
+
+
+def _source_read(source: Source) -> SourceRead:
+    return SourceRead(
+        source_id=source.source_id,
+        name=source.name,
+        source_type=source.source_type,
+        authority_grade=source.authority_grade,
+        approved_domains=source.approved_domains,
+        active=source.active,
+    )
+
+
+@router.post(
+    "/internal/admin/sources",
+    response_model=SourceRead,
+    status_code=201,
+    dependencies=[Depends(require_internal_service)],
+)
+async def create_source_route(
+    payload: SourceCreateRequest, db: AsyncSession = Depends(get_db)
+) -> SourceRead:
+    source = await create_source(db, payload)
+    return _source_read(source)
+
+
+@router.get(
+    "/internal/admin/sources",
+    response_model=SourceListResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def list_sources_route(db: AsyncSession = Depends(get_db)) -> SourceListResponse:
+    sources = await list_sources(db)
+    return SourceListResponse(data=[_source_read(source) for source in sources])
 
 
 def _qstash_destination(request: Request, kind: str | None = None) -> str:
@@ -315,6 +357,70 @@ async def withdraw(
         scholarship_id=scholarship_id,
         lifecycle_state=RecordState.withdrawn.value,
         withdrawn_cycles=cycles,
+    )
+
+
+@router.post(
+    "/internal/admin/scholarships/{scholarship_id}/publish",
+    response_model=PublishCycleResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def publish(
+    scholarship_id: uuid.UUID,
+    payload: PublishCycleRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PublishCycleResponse:
+    """Publish one application cycle, making an approved record public.
+
+    Vocabulary validation (unknown country/degree/field, an empty restricted
+    list) is a 422: the request itself is malformed. A conflict with the
+    record's current state (already withdrawn, a duplicate cycle key) is a
+    409: the request is well-formed but cannot apply right now.
+    """
+    countries = await load_vocabulary(db)
+    try:
+        facts = build_cycle_facts(
+            destinations=payload.destinations,
+            levels=payload.levels,
+            origin_mode=payload.origin_mode,
+            origins=payload.origins,
+            field_mode=payload.field_mode,
+            fields=payload.fields,
+            evidence_fresh=payload.evidence_fresh,
+            deadline_at=payload.deadline_at,
+            countries=countries,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        cycle = await publish_cycle(
+            db,
+            scholarship_id,
+            provider_cycle_key=payload.provider_cycle_key,
+            applicant_segment=payload.applicant_segment,
+            official_cycle_url=str(payload.official_cycle_url),
+            public_status=PublicStatus(payload.public_status),
+            facts=facts,
+            status_valid_until=payload.status_valid_until,
+            last_verified_at=payload.last_verified_at,
+            actor="internal_service",
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.warning(
+        "scholarship_published",
+        extra={"request_id": getattr(request.state, "request_id", "")},
+    )
+    return PublishCycleResponse(
+        scholarship_id=scholarship_id,
+        cycle_id=cycle.cycle_id,
+        lifecycle_state=RecordState.published.value,
+        public_status=cycle.public_status.value,
     )
 
 
