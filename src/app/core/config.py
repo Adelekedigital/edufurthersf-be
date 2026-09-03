@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     internal_service_token: str | None = None
     qstash_current_signing_key: str | None = None
     qstash_next_signing_key: str | None = None
+    qstash_token: str | None = None
     qstash_expected_destination: str = ""
     qstash_url: str = "https://qstash.upstash.io"
     cursor_secret: str = "development-only-change-me"

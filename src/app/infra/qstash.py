@@ -2,6 +2,9 @@ import base64
 import hashlib
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
+
+import httpx
 
 _jwt: Any = None
 try:
@@ -22,6 +25,29 @@ class QStashVerificationConfig:
 def publish_url(qstash_url: str) -> str:
     """Build the regional QStash publish endpoint from one configured host."""
     return f"{qstash_url.rstrip('/')}/v2/publish"
+
+
+@dataclass(frozen=True)
+class QStashPublisher:
+    """Publish JSON jobs to the configured regional QStash endpoint."""
+
+    qstash_url: str
+    token: str
+
+    async def publish(
+        self, destination: str, body: dict[str, Any], deduplication_id: str | None = None
+    ) -> dict[str, Any]:
+        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        if deduplication_id:
+            headers["Upstash-Deduplication-Id"] = deduplication_id
+        url = f"{publish_url(self.qstash_url)}/{quote(destination, safe='')}"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(url, json=body, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("QStash publish response must be an object")
+        return result
 
 
 class QStashVerifier:
