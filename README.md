@@ -29,6 +29,30 @@ The API is available at `http://127.0.0.1:8000`. From the repository root,
 Search only reads published, approved data. Crawling, source processing, and review
 are asynchronous workflows; no LLM is called synchronously by the search endpoint.
 
+## Feed import
+
+`POST /internal/import/feed` accepts the Sheet's five known columns per row: `url`
+(Link), `title` (Title), `excerpt` (Description), `source_posted_at` (Source Posted
+Date) and `feed_created_at` (Created Date). The two dates are discovery/publication
+signals only — never application deadlines — and are carried through unchanged.
+
+Every call opens one `CrawlRun` and every row lands in exactly one bucket:
+
+- **imported** — a URL never seen before.
+- **repeated** — an already known URL and unchanged content; only the page's
+  `last_seen_at` moves.
+- **changed** — an already known URL whose content moved. A new `Discovery`
+  revision is created with `supersedes_discovery_id` pointing at the one it
+  replaces; the earlier row is never deleted or overwritten, so a decision made
+  from it stays explainable.
+- **rejected** — could not become a `Discovery` at all (an unparsable URL, or a
+  source id that does not resolve to an active `Source`). Preserved in
+  `DiscoveryQuarantine` rather than dropped, so "quarantine unparsable rows"
+  means the raw row survives, not just that it was counted.
+
+The response carries the run's `crawl_run_id` alongside the four counts, and every
+`ProcessingJob` the import enqueues records that id as its `correlation_id`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for local configuration. The database URL must use the

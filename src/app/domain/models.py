@@ -154,6 +154,10 @@ class SourcePage(TimestampMixin, Base):
     last_successful_fetch_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Touched whenever a feed row reports this URL again, independent of
+    # whether the fetcher has ever run. Distinct from last_attempted_at, which
+    # tracks a direct GET, not the feed re-reporting an already known URL.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (UniqueConstraint("source_id", "normalized_url"),)
@@ -178,9 +182,20 @@ class Discovery(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=new_uuid7
     )
     source_page_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_pages.page_id"))
+    # Which import produced this row. Nullable because a discovery can also
+    # originate from a direct fetch rather than a feed import.
+    crawl_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("crawl_runs.crawl_run_id"), nullable=True
+    )
     content_hash: Mapped[str] = mapped_column(String(128))
     raw_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The feed's own dates. Discovery/publication signals, never application
+    # deadlines: a past Source Posted Date does not mean anything closed.
+    source_posted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    feed_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_state: Mapped[str] = mapped_column(String(40), default="discovered")
     normalized_identity_key: Mapped[str | None] = mapped_column(
         String(500), nullable=True, index=True
@@ -188,8 +203,61 @@ class Discovery(TimestampMixin, Base):
     canonical_scholarship_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # The prior discovery whose content this row revises. A changed re-crawl of
+    # an already known URL creates a new row rather than overwriting the old
+    # one, so a decision made from the earlier content stays explainable.
+    supersedes_discovery_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("discoveries.discovery_id"), nullable=True
+    )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (UniqueConstraint("source_page_id", "content_hash"),)
+
+
+class CrawlRun(TimestampMixin, Base):
+    """One import batch's identity, timing, scope and outcome.
+
+    Summarizes a run so an operator can see overall collection health without
+    reading every row; QStash delivers and retries the work, this records what
+    the work did.
+    """
+
+    __tablename__ = "crawl_runs"
+    crawl_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    kind: Mapped[str] = mapped_column(String(60), index=True)
+    scope: Mapped[dict] = mapped_column(JSONB, default=dict)
+    state: Mapped[str] = mapped_column(String(30), default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    imported_count: Mapped[int] = mapped_column(Integer, default=0)
+    repeated_count: Mapped[int] = mapped_column(Integer, default=0)
+    changed_count: Mapped[int] = mapped_column(Integer, default=0)
+    rejected_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DiscoveryQuarantine(Base):
+    """A raw feed row that could not become a Discovery, kept rather than dropped.
+
+    An unresolvable source id or an unparsable URL means no SourcePage exists
+    to attach a Discovery to, but the row must still be retrievable: quarantine
+    only means something if the row survives it.
+    """
+
+    __tablename__ = "discovery_quarantine"
+    quarantine_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    crawl_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("crawl_runs.crawl_run_id"))
+    # Not a foreign key: the row may be quarantined precisely because this id
+    # does not resolve to any Source.
+    source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    raw_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Verification(TimestampMixin, Base):
