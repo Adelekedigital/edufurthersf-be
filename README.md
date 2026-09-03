@@ -78,6 +78,20 @@ bucket per request. Suitable for local development or a single API instance;
 before running multiple instances, use a platform-level limiter or a shared store. Before running multiple instances, use a
 Railway/platform-level limiter or replace it with a shared-store implementation.
 
+## Taxonomy and Core alignment
+
+Degree codes are ISCED-aligned to match Core's `degree_levels` slugs
+(`masters`, `doctorate`). A join intent forwards `program_level` to Core, which
+cannot resolve a code it does not hold, so the Finder accepts `phd` as an input
+alias and normalises it to `doctorate`. The user-facing label stays "PhD".
+
+Countries and fields are still hardcoded in `domain/taxonomy.py`. Core publishes
+countries at the unauthenticated `GET /api/v1/catalog/countries`, which is the
+right source of truth for country identity; it must be mirrored into a local
+table by a scheduled job rather than called per search, because search has to
+keep working while Core is down. Core has no field-of-study catalogue, so the
+field taxonomy stays Finder-owned.
+
 ## Tests
 
 The suite includes integration tests that run against a real PostgreSQL database,

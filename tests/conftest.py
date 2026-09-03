@@ -72,8 +72,10 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
         await conn.execute(
             text(
                 "TRUNCATE searches, anonymous_sessions, join_requests, scholarship_cycles, "
-                "scholarships, providers, processing_jobs, review_tasks, discoveries, "
-                "source_pages, sources RESTART IDENTITY CASCADE"
+                "scholarship_revisions, scholarships, providers, processing_jobs, "
+                "review_tasks, discoveries, source_snapshots, source_pages, sources, "
+                "outbox_events, consumer_receipts, audit_log, verifications, "
+                "verification_evidence RESTART IDENTITY CASCADE"
             )
         )
 

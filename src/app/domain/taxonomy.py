@@ -8,6 +8,7 @@ class Taxonomy:
     degrees: dict[str, str]
     fields: dict[str, str]
     aliases: dict[str, str]
+    degree_aliases: dict[str, str]
 
     def country(self, value: str) -> str:
         code = value.strip().upper()
@@ -17,6 +18,7 @@ class Taxonomy:
 
     def degree(self, value: str) -> str:
         code = value.strip().lower()
+        code = self.degree_aliases.get(code, code)
         if code not in self.degrees:
             raise ValueError("Unsupported degree level")
         return code
@@ -32,13 +34,27 @@ class Taxonomy:
 TAXONOMY = Taxonomy(
     version="taxonomy-v1",
     countries={"NG": "Nigeria", "CA": "Canada", "GB": "United Kingdom", "US": "United States"},
-    degrees={"masters": "Master’s", "phd": "PhD"},
+    # Codes are ISCED-aligned to match Core's `degree_levels` slugs, because a
+    # join intent forwards this value and Core cannot resolve one it does not
+    # hold. The label stays "PhD"; only the wire code is `doctorate`.
+    degrees={"masters": "Master’s", "doctorate": "PhD"},
     fields={"public_health": "Public Health", "computer_science": "Computer Science"},
     aliases={
         "public health": "public_health",
         "mph": "public_health",
         "computer science": "computer_science",
         "cs": "computer_science",
+    },
+    degree_aliases={
+        "phd": "doctorate",
+        "ph.d": "doctorate",
+        "ph.d.": "doctorate",
+        "doctoral": "doctorate",
+        "master's": "masters",
+        "master": "masters",
+        "msc": "masters",
+        "ma": "masters",
+        "mba": "masters",
     },
 )
 

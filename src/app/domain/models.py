@@ -244,10 +244,21 @@ class ProcessingJob(TimestampMixin, Base):
     )
     kind: Mapped[str] = mapped_column(String(60))
     dedupe_key: Mapped[str] = mapped_column(String(500), unique=True)
-    state: Mapped[str] = mapped_column(String(30), default="queued")
+    state: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backoff was computed on failure and thrown away for want of a column, so
+    # a retry could run immediately and no sweeper could find due work.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    # A claim that dies mid-flight leaves the row running forever without this;
+    # the reconcile sweep returns expired leases to the queue.
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class OutboxEvent(TimestampMixin, Base):
@@ -256,10 +267,16 @@ class OutboxEvent(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=new_uuid7
     )
     event_type: Mapped[str] = mapped_column(String(120))
-    destination: Mapped[str] = mapped_column(String(50))
+    # Consumers filter on this. One shared table with mixed destinations is
+    # only safe if every reader is scoped to its own.
+    destination: Mapped[str] = mapped_column(String(50), index=True)
+    # Makes a retried request idempotent: a re-requested response must not
+    # emit a second business event for the same logical change.
+    dedupe_key: Mapped[str] = mapped_column(String(500), unique=True)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
-    state: Mapped[str] = mapped_column(String(30), default="pending")
+    state: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ConsumerReceipt(TimestampMixin, Base):
@@ -283,15 +300,39 @@ class AnonymousSession(TimestampMixin, Base):
 
 
 class Search(TimestampMixin, Base):
+    """One evaluated response page.
+
+    A logical search groups its pages by `search_id`; each page is its own row
+    with its own `id`, so re-evaluating a page never overwrites what an earlier
+    one returned. `result_snapshot` holds the public result objects in the order
+    they were returned, which is what makes a later click or a ranking
+    complaint explainable after the catalogue has moved on.
+    """
+
     __tablename__ = "searches"
-    search_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    __table_args__ = (
+        UniqueConstraint("search_id", "page_number", name="uq_searches_search_id_page"),
     )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid7)
+    search_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, default=new_uuid7)
     session_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("anonymous_sessions.session_id"), nullable=True
     )
     filter_digest: Mapped[str] = mapped_column(String(128))
     filters: Mapped[dict] = mapped_column(JSONB, default=dict)
+    result_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    snapshot_schema_version: Mapped[str] = mapped_column(String(20), default="snapshot-v1")
+    match_policy_version: Mapped[str] = mapped_column(String(50), default="match-v1")
+    taxonomy_version: Mapped[str] = mapped_column(String(50), default="taxonomy-v1")
+    page_number: Mapped[int] = mapped_column(Integer, default=1)
+    requested_limit: Mapped[int] = mapped_column(Integer, default=20)
+    returned_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_match_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

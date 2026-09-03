@@ -22,10 +22,36 @@ class JobTransition:
     error: str | None
 
 
-def claim_job(state: str, attempts: int, *, now: datetime | None = None) -> JobTransition:
+#: How long a claim is held before a sweeper may reclaim it. Long enough for a
+#: bounded handler to finish, short enough that a crashed worker frees its work.
+LEASE_SECONDS = 900
+
+
+def claim_job(
+    state: str,
+    attempts: int,
+    *,
+    now: datetime | None = None,
+    next_attempt_at: datetime | None = None,
+) -> JobTransition:
+    """Move a queued or waiting job into running, honouring its backoff."""
+    current = now or datetime.now(UTC)
     if state not in {JobState.queued, JobState.retry_wait}:
         raise ValueError("Job is not claimable")
+    if next_attempt_at is not None and next_attempt_at > current:
+        raise ValueError("Job is not due yet")
     return JobTransition(JobState.running, attempts + 1, None, None)
+
+
+def lease_expiry(now: datetime | None = None) -> datetime:
+    return (now or datetime.now(UTC)) + timedelta(seconds=LEASE_SECONDS)
+
+
+def is_lease_expired(lease_expires_at: datetime | None, *, now: datetime | None = None) -> bool:
+    """A running job whose lease has elapsed is presumed abandoned."""
+    if lease_expires_at is None:
+        return False
+    return lease_expires_at <= (now or datetime.now(UTC))
 
 
 def finish_job() -> JobTransition:

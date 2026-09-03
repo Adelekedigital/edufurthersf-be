@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from pydantic import field_validator, model_validator
@@ -46,17 +47,27 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_deployed_secrets(self) -> Settings:
-        """Refuse to boot a deployed environment with placeholder secrets.
+        """Refuse to boot a deployed environment without its signing inputs.
 
-        Shipping the development cursor key would let anyone mint pagination
-        cursors, and it is the kind of default that survives to production
-        precisely because nothing complains about it.
+        Only QSTASH_EXPECTED_DESTINATION is fatal. Without it the job route
+        falls back to a URL rebuilt from proxy headers, which reduces the
+        signature's destination binding to a path comparison and lets a
+        delivery signed for one environment be replayed against another.
+
+        The cursor key is a warning instead. Today a forged cursor only sets an
+        integer offset into results the caller can already fetch, so refusing to
+        boot over it costs more than it protects. Promote this to an error when
+        the cursor starts carrying ranking state, as the technical design
+        intends: at that point a forged cursor reorders someone else's results.
         """
         if self.environment.lower() in DEPLOYED_ENVIRONMENTS:
-            if self.cursor_secret == DEVELOPMENT_CURSOR_PLACEHOLDER:
-                raise ValueError("CURSOR_SECRET must be set outside development")
             if not self.qstash_expected_destination:
                 raise ValueError("QSTASH_EXPECTED_DESTINATION must be set outside development")
+            if self.cursor_secret == DEVELOPMENT_CURSOR_PLACEHOLDER:
+                logging.getLogger("app.config").warning(
+                    "cursor_secret_is_the_development_placeholder",
+                    extra={"reason": "set CURSOR_SECRET to a unique random value"},
+                )
         return self
 
     @property
