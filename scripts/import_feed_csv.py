@@ -53,7 +53,18 @@ _HEADER_ALIASES: dict[str, set[str]] = {
     "feed_created_at": {"created date", "feed_created_at", "created_at"},
 }
 
-_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S")
+# "%B %d %Y" ("November 28 2025") is ScholarshipRegion's own Source Posted
+# Date format, confirmed against the live feed export - every other format
+# here failed silently on that column and would have dropped the date
+# feed-wide rather than raising anything a dry run would show.
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y-%m-%dT%H:%M:%S",
+    "%m/%d/%Y %H:%M:%S",
+    "%B %d %Y",
+)
 
 
 def _normalize_header(name: str) -> str:
@@ -94,9 +105,22 @@ def _parse_date(value: str) -> datetime | None:
     return None
 
 
-def _read_rows(path: str, source_id: uuid.UUID) -> Iterator[tuple[int, FeedRecord | str]]:
-    """Yield (row_number, FeedRecord) for a valid row, or (row_number, error) for
-    one that fails local validation."""
+def _unparsed_date_warning(label: str, raw: str, parsed: datetime | None) -> str | None:
+    """A non-blank date that failed every known format is a silent data loss,
+    not a validation failure - the row still imports, just without that date.
+    Surfaced explicitly rather than only showing up as a gap in the database
+    later: an unfamiliar format quietly dropping a date feed-wide is exactly
+    what happened here before this check existed."""
+    if raw.strip() and parsed is None:
+        return f"{label} {raw.strip()!r} did not match any known format"
+    return None
+
+
+def _read_rows(
+    path: str, source_id: uuid.UUID
+) -> Iterator[tuple[int, FeedRecord | str, list[str]]]:
+    """Yield (row_number, FeedRecord, date_warnings) for a valid row, or
+    (row_number, error, []) for one that fails local validation."""
     with open(path, encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
@@ -110,14 +134,24 @@ def _read_rows(path: str, source_id: uuid.UUID) -> Iterator[tuple[int, FeedRecor
                 continue  # a blank trailing line, not a real row
             posted_raw = row.get(columns.get("source_posted_at", ""), "") or ""
             created_raw = row.get(columns.get("feed_created_at", ""), "") or ""
+            posted_at = _parse_date(posted_raw)
+            created_at = _parse_date(created_raw)
+            warnings = [
+                message
+                for message in (
+                    _unparsed_date_warning("Source Posted Date", posted_raw, posted_at),
+                    _unparsed_date_warning("Created Date", created_raw, created_at),
+                )
+                if message is not None
+            ]
             try:
                 record = FeedRecord(
                     source_id=source_id,
                     url=url,
                     title=title,
                     excerpt=excerpt,
-                    source_posted_at=_parse_date(posted_raw),
-                    feed_created_at=_parse_date(created_raw),
+                    source_posted_at=posted_at,
+                    feed_created_at=created_at,
                 )
             except ValidationError as exc:
                 yield (
@@ -126,9 +160,10 @@ def _read_rows(path: str, source_id: uuid.UUID) -> Iterator[tuple[int, FeedRecor
                         f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
                         for error in exc.errors()
                     ),
+                    warnings,
                 )
                 continue
-            yield row_number, record
+            yield row_number, record, warnings
 
 
 def _batches(records: list[FeedRecord], size: int) -> Iterator[list[FeedRecord]]:
@@ -162,11 +197,25 @@ def main() -> int:
     batch_size = min(args.batch_size, API_BATCH_CAP)
     records: list[FeedRecord] = []
     problems: list[tuple[int, str]] = []
-    for row_number, result in _read_rows(args.csv_path, args.source_id):
+    date_warnings: list[tuple[int, str]] = []
+    for row_number, result, warnings in _read_rows(args.csv_path, args.source_id):
         if isinstance(result, str):
             problems.append((row_number, result))
         else:
             records.append(result)
+        for warning in warnings:
+            date_warnings.append((row_number, warning))
+
+    if date_warnings:
+        distinct = sorted({message for _, message in date_warnings})
+        print(
+            f"WARNING: {len(date_warnings)} row(s) had a date matching none of the known "
+            f"formats - the row still imports, just without that date:"
+        )
+        for message in distinct[:10]:
+            print(f"  {message}")
+        if len(distinct) > 10:
+            print(f"  ... and {len(distinct) - 10} more distinct value(s)")
 
     total_rows = len(records) + len(problems)
     print(f"Parsed {total_rows} rows: {len(records)} valid, {len(problems)} rejected locally")
