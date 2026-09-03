@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -46,6 +47,10 @@ router = APIRouter()
 search_limiter = InMemoryRateLimiter()
 # The join path is far more expensive than a search: it calls Core.
 JOIN_INTENTS_PER_MINUTE = 5
+# Eligibility is evaluated in Python, so one search scans the published set.
+# Comfortably above the 150-record launch target and the 300-record maturity
+# target; passing it emits a warning instead of silently truncating results.
+PUBLISHED_CYCLE_SCAN_LIMIT = 2000
 join_limiter = InMemoryRateLimiter()
 
 
@@ -357,9 +362,20 @@ async def search(
         .join(ScholarshipCycle.scholarship)
         .where(ScholarshipCycle.scholarship.has(lifecycle_state=RecordState.published))
         .options(selectinload(ScholarshipCycle.scholarship).selectinload(Scholarship.provider))
-        .limit(150)
+        .order_by(ScholarshipCycle.cycle_id)
+        .limit(PUBLISHED_CYCLE_SCAN_LIMIT + 1)
     )
     rows = result.scalars().all()
+    warnings: list[str] = []
+    if len(rows) > PUBLISHED_CYCLE_SCAN_LIMIT:
+        # Matching happens in Python, so the index has outgrown one scan. Say so
+        # rather than quietly returning a subset as though it were complete.
+        rows = rows[:PUBLISHED_CYCLE_SCAN_LIMIT]
+        warnings.append("index_scan_truncated")
+        logger.warning(
+            "search_scan_truncated",
+            extra={"request_id": getattr(request.state, "request_id", "")},
+        )
     matched: list[SearchResult] = [
         _search_result(row, decision, evaluated_at)
         for row in rows
@@ -395,7 +411,7 @@ async def search(
             evaluated_at=evaluated_at,
             confirmed_counts=confirmed_counts,
             possible_match_count=sum(item.fit == "possible" for item in matched),
-            warnings=[],
+            warnings=warnings,
         ),
     )
 
@@ -432,5 +448,12 @@ async def scholarship_detail(
 
 
 async def database_ready(db: AsyncSession) -> bool:
-    await db.execute(text("SELECT 1"))
+    """Confirm the database answers, under a bound.
+
+    An unbounded probe turns a stalled database into a hanging readiness check,
+    which reads as healthy to a platform waiting on the response.
+    """
+    await asyncio.wait_for(
+        db.execute(text("SELECT 1")), timeout=get_settings().db_connect_timeout_seconds
+    )
     return True

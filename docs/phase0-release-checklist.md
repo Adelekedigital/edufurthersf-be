@@ -5,16 +5,26 @@ recorded evidence. Keep credentials and customer data out of evidence attachment
 
 ## Current Phase 0 status
 
-The current Phase 0 scope is complete: the backend is published, staging migrations
-have succeeded, the API is deployed, staging smoke checks pass, and the GitHub quality
-gate is green.
+The backend is published, staging migrations have succeeded, the API is deployed and
+the GitHub quality gate is green.
+
+An earlier revision recorded this scope as complete on the strength of smoke checks
+that probed only `/health`, `/ready` and `/api/v1/taxonomies`. None of those touch the
+scholarship tables, so they passed while `POST /api/v1/search` and the scholarship
+detail route returned 500 against the migrated schema, and while every anonymous
+session, search and join request was discarded without being committed. Both are
+fixed, the smoke script now exercises search and detail, and the quality gate runs
+against a real PostgreSQL service container.
+
+Re-record staging evidence against the current build before treating this scope as
+closed. A green gate is evidence about the code, not about the deployment.
 
 ## Phase 0 and deferred validation matrix
 
 | Item | Owner | What is needed to close it | Evidence |
 | --- | --- | --- | --- |
 | Automated quality gate | Engineering | Already implemented | Passing `scripts/check.py` output |
-| Staging API smoke test | You/Engineering | A running staging URL and deploy access | `SMOKE_BASE_URL=... python scripts/smoke.py` returns three PASS lines |
+| Staging API smoke test | You/Engineering | A running staging URL and deploy access | `SMOKE_BASE_URL=... python scripts/smoke.py` passes health, ready, taxonomies and search, plus detail when the index is non-empty |
 | Core join intent | You/Core owner | Core staging URL, service token, allowed return URL, and a test search/session | One successful request plus same-key retry with no duplicate Core intent |
 | QStash delivery | You/Platform owner | Region, QStash URL, current/next signing keys, and a staging callback URL | Accepted signed delivery and rejected replay/invalid-region or signature case |
 | Sentry verification | You/Platform owner | Staging Sentry DSN and permission to inspect the project | Scrubbed test event visible in Sentry |
@@ -44,7 +54,13 @@ uv sync --group dev
 uv run python scripts/check.py
 ```
 
-The gate must pass compilation, tests, Ruff, mypy, Bandit, and pip-audit.
+The gate must pass compilation, tests, Ruff, mypy, Bandit, and pip-audit, and it
+enforces an 85% branch-coverage floor.
+
+The test suite includes integration tests that run against a real PostgreSQL
+database; point `TEST_DATABASE_URL` at a disposable one before running the gate.
+`SKIP_DB_TESTS=1` skips them and prints a warning. A run with the database tests
+skipped is not a full pass and must not be used as Phase 0 evidence.
 
 ## Environment checks
 
