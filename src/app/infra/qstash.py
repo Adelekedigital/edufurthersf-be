@@ -153,5 +153,6 @@ ALLOWED_JOB_KINDS = frozenset(
         "reverify_due",
         "dispatch_outbox",
         "reconcile_stuck_jobs",
+        "sync_countries",
     }
 )

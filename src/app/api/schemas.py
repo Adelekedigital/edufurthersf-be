@@ -12,7 +12,10 @@ class TaxonomyItem(BaseModel):
 
 class TaxonomiesResponse(BaseModel):
     version: str
+    #: Every country a student may state as their origin.
     countries: list[TaxonomyItem]
+    #: The subset with verified coverage, which is where a search can be run.
+    destinations: list[TaxonomyItem]
     degrees: list[TaxonomyItem]
     fields: list[TaxonomyItem]
 

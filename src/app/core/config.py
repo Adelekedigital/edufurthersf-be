@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     qstash_expected_destination: str = ""
     qstash_url: str = "https://qstash.upstash.io"
     cursor_secret: str = "development-only-change-me"
+    # Core's public API root; its reference catalogues are unauthenticated.
+    core_base_url: str | None = None
     core_join_intent_url: str | None = None
     core_service_token: str | None = None
     core_allowed_return_url_prefix: str | None = None
