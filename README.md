@@ -1,1 +1,105 @@
-# Edufurther Scholarship Finder BackendInitial Core-aligned backend foundation for the standalone Scholarship Finder.## Run locally```powershelluv sync --group dev$env:DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/scholarship_finder"uv run fastapi dev```For a reproducible local database, start PostgreSQL with `docker compose up -d postgres`, then run `uv run alembic upgrade head` before starting the API. The service container uses the same `fastapi run` entrypoint and does not run migrations automatically.Staging and production migrations are applied explicitly through the manually triggered `Database migrations` GitHub Actions workflow. Configure a `DATABASE_URL` secret in each GitHub Environment and require approval for the production environment.The service exposes `GET /health`, `GET /ready`, `GET /api/v1/taxonomies`, and the versioned search/details contracts. Search only reads published, approved data; it does not crawl sources or call an LLM synchronously.From the repository root, use `uv run fastapi dev`. The project is configured as an installable `src`-layout package with the `app.main:app` entrypoint. The FastAPI standard extra provides the FastAPI CLI and Uvicorn development runtime, so Uvicorn does not need to be declared separately.## Runtime notes- The current anonymous search limiter is process-local memory. It is appropriate for local development and single-process testing only; production must replace it with a shared store or Railway/platform-level limiter so limits apply consistently across instances.- `INTERNAL_SERVICE_TOKEN` and `CURSOR_SECRET` must be set to strong environment-specific secrets outside development. Internal routes fail closed when the service token is missing.- QStash verification is intentionally fail-closed until the production adapter validates the raw body, issuer, destination, expiry/not-before, and current/next signing keys.- `QSTASH_URL` is regional configuration. Keep it aligned with the QStash account region; for a US account use `https://qstash-us-east-1.upstash.io`. Tokens and endpoints are region-scoped.- QStash jobs should publish to the stable `POST /api/v1/internal/jobs` destination with `kind` in the signed body. The older `/internal/jobs/{kind}` route remains as a compatibility route. Set `QSTASH_EXPECTED_DESTINATION` to the deployed stable callback URL, not merely the API base URL.- Core handoff requires `CORE_JOIN_INTENT_URL`, `CORE_SERVICE_TOKEN`, and `CORE_ALLOWED_RETURN_URL_PREFIX`. The join-intent endpoint sends only consented search context, uses the caller's idempotency key, and rejects return URLs outside the configured Core origin.## Checks```powershelluv run ruff check .uv run pytestpython scripts/check.pypython scripts/smoke.py````scripts/check.py` is the single local quality-gate entrypoint. Missing Ruff, mypy, or Bandit tools are reported locally but must be installed in CI; the current environment may not have the complete security toolchain yet.GitHub CI runs the same gate plus `pip-audit` and Gitleaks on pushes and pull requests. Production release still requires PostgreSQL, QStash, Core, and staging smoke validation.The evidence-driven Phase 0 release checklist is in [`docs/phase0-release-checklist.md`](docs/phase0-release-checklist.md).
+﻿# Edufurther Scholarship Finder Backend
+
+Backend foundation for the standalone Edufurther Scholarship Finder. The service
+helps international graduate students discover verified scholarship opportunities.
+
+## Quick start
+
+Requirements: Python 3.14+, `uv`, and Docker Desktop for local PostgreSQL.
+
+```powershell
+uv sync --group dev
+docker compose up -d postgres
+uv run alembic upgrade head
+uv run fastapi dev
+```
+
+The API is available at `http://127.0.0.1:8000`. From the repository root,
+`uv run fastapi dev` discovers the configured `app.main:app` entrypoint automatically.
+
+## API surface
+
+- `GET /health` — liveness check
+- `GET /ready` — database readiness check
+- `GET /api/v1/taxonomies` — supported search taxonomy
+- `POST /api/v1/search` — search published scholarships
+- `GET /api/v1/scholarships/{id-or-slug}` — scholarship details
+- `POST /api/v1/internal/jobs` — stable QStash job callback
+
+Search only reads published, approved data. Crawling, source processing, and review
+are asynchronous workflows; no LLM is called synchronously by the search endpoint.
+
+## Configuration
+
+Copy `.env.example` to `.env` for local configuration. The database URL must use the
+SQLAlchemy asyncpg format:
+
+```text
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
+```
+
+For staging and production, set secrets in the deployment platform rather than in
+the repository. Core join intent and Sentry are optional integrations and may remain
+unset until those integrations are activated.
+
+### QStash
+
+QStash is regional. Set `QSTASH_URL` to the region where the account was created and
+use signing keys from that same region. For a US account, use:
+
+```text
+QSTASH_URL=https://qstash-us-east-1.upstash.io
+```
+
+Publish jobs to the stable callback URL:
+
+```text
+POST https://api.example.com/api/v1/internal/jobs
+```
+
+Put the job `kind` in the signed JSON body and set
+`QSTASH_EXPECTED_DESTINATION` to the complete callback URL, not just the API base
+URL. The older `/internal/jobs/{kind}` route remains for compatibility.
+
+### Rate limiting
+
+The current anonymous search limiter is process-local and suitable for local
+development or a single API instance. Before running multiple instances, use a
+Railway/platform-level limiter or replace it with a shared-store implementation.
+
+## Database migrations
+
+Local migration validation uses:
+
+```powershell
+uv run alembic upgrade head
+```
+
+Staging and production migrations are applied explicitly through the manually
+triggered `Database migrations` GitHub Actions workflow. Configure `DATABASE_URL` as
+a secret in the corresponding GitHub Environment and require approval for production.
+
+The API container does not run migrations automatically at startup.
+
+## Quality checks
+
+Run the complete local quality gate:
+
+```powershell
+uv run python scripts/check.py
+```
+
+This runs compilation, tests, Ruff, mypy, Bandit, and pip-audit when those tools are
+installed. The staging smoke test is separate because it requires a running service:
+
+```powershell
+$env:SMOKE_BASE_URL = "http://127.0.0.1:8000"
+uv run python scripts/smoke.py
+```
+
+GitHub Actions runs the quality gate and Gitleaks on pushes and pull requests.
+
+## Project documentation
+
+The evidence-driven Phase 0 release checklist is available at
+[`docs/phase0-release-checklist.md`](docs/phase0-release-checklist.md).
