@@ -299,6 +299,27 @@ class AnonymousSession(TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Country(TimestampMixin, Base):
+    """One ISO 3166-1 country, mirrored from Core's catalogue.
+
+    Core owns country identity. `is_supported_destination` is Finder's, driven
+    by verified coverage rather than by anything Core knows, so a sync must
+    leave it alone.
+    """
+
+    __tablename__ = "countries"
+    country_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    code: Mapped[str] = mapped_column(String(2), unique=True)
+    display_name: Mapped[str] = mapped_column(Text)
+    # Traceability only. Core states reference ids differ per environment, so
+    # nothing may resolve a country by this value.
+    core_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    is_supported_destination: Mapped[bool] = mapped_column(Boolean, default=False)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Search(TimestampMixin, Base):
     """One evaluated response page.
 

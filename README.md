@@ -85,12 +85,27 @@ Degree codes are ISCED-aligned to match Core's `degree_levels` slugs
 cannot resolve a code it does not hold, so the Finder accepts `phd` as an input
 alias and normalises it to `doctorate`. The user-facing label stays "PhD".
 
-Countries and fields are still hardcoded in `domain/taxonomy.py`. Core publishes
-countries at the unauthenticated `GET /api/v1/catalog/countries`, which is the
-right source of truth for country identity; it must be mirrored into a local
-table by a scheduled job rather than called per search, because search has to
-keep working while Core is down. Core has no field-of-study catalogue, so the
-field taxonomy stays Finder-owned.
+Countries are mirrored from Core's unauthenticated
+`GET /api/v1/catalog/countries` into the local `countries` table by the
+`sync_countries` job. The mirror is never read through Core at request time:
+search has to keep answering while Core is down. Set `CORE_BASE_URL` to enable
+the sync; until it runs, a small built-in seed stands in.
+
+Origin and destination are separate lists. Origin accepts any country Core
+publishes — restricting it to the countries the index covers would turn "we
+have nothing for you yet" into "you do not exist". Destination is limited to
+`is_supported_destination`, a Finder-owned column recording verified coverage
+that the sync deliberately never overwrites.
+
+Degree levels are **not** mirrored. Core's vocabulary is four closed rows that
+users cannot add to, and the Finder deliberately offers two of them, so a
+runtime fetch would import levels the product must not offer and put a network
+call in front of four constants. The codes stay local and
+`tests/test_core_contract.py` pins the agreement instead, failing in CI rather
+than at a handoff.
+
+Core has no field-of-study catalogue — programme names there are free text by
+design — so the field taxonomy is Finder-owned.
 
 ## Tests
 

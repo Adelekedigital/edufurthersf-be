@@ -3,8 +3,11 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.domain.models import Discovery
 from app.domain.normalization import normalize_discovery
+from app.infra.core_catalogue import CoreCatalogueClient
+from app.infra.countries import sync_countries
 from app.infra.jobs import (
     claim_job_for_execution,
     complete_job,
@@ -30,6 +33,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await dispatch_analytics_events(db)
         elif job.kind == "reconcile_stuck_jobs":
             await reconcile_stuck_jobs(db)
+        elif job.kind == "sync_countries":
+            await _sync_countries(db)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.
@@ -53,3 +58,11 @@ async def _normalize_discovery(db: AsyncSession, payload: dict) -> None:
     discovery.normalized_identity_key = normalized.identity_key
     discovery.processing_state = "normalized"
     await db.commit()
+
+
+async def _sync_countries(db: AsyncSession) -> None:
+    """Refresh the country mirror from Core's public catalogue."""
+    settings = get_settings()
+    if not settings.core_base_url:
+        raise ValueError("CORE_BASE_URL is not configured")
+    await sync_countries(db, CoreCatalogueClient(settings.core_base_url))

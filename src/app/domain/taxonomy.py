@@ -1,5 +1,11 @@
 from dataclasses import dataclass
 
+from app.domain.countries import (
+    SEED_COUNTRIES,
+    SUPPORTED_DESTINATIONS,
+    CountryVocabulary,
+)
+
 
 @dataclass(frozen=True)
 class Taxonomy:
@@ -60,10 +66,23 @@ TAXONOMY = Taxonomy(
 
 
 def normalize_search_filters(
-    origin_country: str, target_countries: list[str], program_level: str, field: str
+    origin_country: str,
+    target_countries: list[str],
+    program_level: str,
+    field: str,
+    countries: CountryVocabulary | None = None,
 ) -> tuple[str, frozenset[str], str, str]:
-    origin = TAXONOMY.country(origin_country)
-    destinations = frozenset(TAXONOMY.country(value) for value in target_countries)
+    """Normalise the four inputs, or say which one is unsupported.
+
+    Countries come from the mirrored vocabulary when one is supplied, so origin
+    accepts any country Core publishes while destinations stay limited to
+    verified coverage.
+    """
+    vocabulary = countries or CountryVocabulary(
+        names=dict(SEED_COUNTRIES), destinations=SUPPORTED_DESTINATIONS
+    )
+    origin = vocabulary.origin(origin_country)
+    destinations = frozenset(vocabulary.destination(value) for value in target_countries)
     if not destinations:
         raise ValueError("At least one destination is required")
     return origin, destinations, TAXONOMY.degree(program_level), TAXONOMY.field(field)

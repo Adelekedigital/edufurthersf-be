@@ -51,6 +51,7 @@ from app.domain.snapshots import build_result_snapshot
 from app.domain.status import evaluate_public_status
 from app.domain.taxonomy import TAXONOMY, normalize_search_filters
 from app.infra.core_client import CoreJoinClient
+from app.infra.countries import load_vocabulary
 from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import enqueue_job
@@ -336,11 +337,23 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
 
 
 @router.get("/taxonomies", response_model=TaxonomiesResponse)
-async def taxonomies() -> TaxonomiesResponse:
+async def taxonomies(db: AsyncSession = Depends(get_db)) -> TaxonomiesResponse:
+    """The vocabularies a search form is built from.
+
+    Countries come from the mirror of Core's catalogue; destinations are the
+    subset with verified coverage, returned separately so the form can offer
+    every origin while limiting where a search can be run.
+    """
+    countries = await load_vocabulary(db)
     return TaxonomiesResponse(
         version=TAXONOMY.version,
         countries=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.countries.items()
+            TaxonomyItem(code=code, label=label) for code, label in sorted(countries.names.items())
+        ],
+        destinations=[
+            TaxonomyItem(code=code, label=countries.names[code])
+            for code in sorted(countries.destinations)
+            if code in countries.names
         ],
         degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()],
         fields=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.fields.items()],
@@ -431,9 +444,14 @@ async def search(
         raise HTTPException(status_code=429, detail="Search rate limit exceeded")
     evaluated_at = datetime.now(UTC)
     started = perf_counter()
+    countries = await load_vocabulary(db)
     try:
         origin, destinations, degree, field = normalize_search_filters(
-            payload.origin_country, payload.target_countries, payload.program_level, payload.field
+            payload.origin_country,
+            payload.target_countries,
+            payload.program_level,
+            payload.field,
+            countries,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
