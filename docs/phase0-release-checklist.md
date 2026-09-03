@@ -25,6 +25,20 @@ scholarship has been published, so search has nothing to return yet. The deferre
 items below (Core join, Sentry, rate limiting, backup/rollback) are scheduled
 alongside the capability that needs them and are not release blockers.
 
+Two gaps that stood between the code and a real record reaching search are now
+closed: `POST /internal/admin/sources` creates the `Source` rows the feed import
+requires, and `POST /internal/admin/scholarships/{id}/publish` creates a
+`ScholarshipCycle` and flips `lifecycle_state` to `published` — previously
+nothing did either. Evidence for a published fact is asserted by the reviewer in
+that request rather than independently recorded per claim; formal
+`verifications`/`verification_evidence` linkage is a deliberate later revisit,
+not an oversight.
+
+Staging's schema is still behind `main` — the "Database migrations" workflow has
+not been re-run since migration `0007`, so `0007`–`0011` (including the publish
+endpoint's dependencies) are not yet applied there. Run it for `staging` before
+exercising any of this against the deployed environment.
+
 ## Phase 0 and deferred validation matrix
 
 | Item | Owner | Status | Evidence |
