@@ -20,7 +20,7 @@ The API is available at `http://127.0.0.1:8000`. From the repository root,
 ## API surface
 
 - `GET /health` — liveness check
-- `GET /ready` — database readiness check
+- `GET /ready` — database readiness check; also reports schema drift (see below)
 - `GET /api/v1/taxonomies` — supported search taxonomy
 - `POST /api/v1/search` — search published scholarships
 - `GET /api/v1/scholarships/{id-or-slug}` — scholarship details
@@ -187,7 +187,22 @@ Staging and production migrations are applied explicitly through the manually
 triggered `Database migrations` GitHub Actions workflow. Configure `DATABASE_URL` as
 a secret in the corresponding GitHub Environment and require approval for production.
 
-The API container does not run migrations automatically at startup.
+The API container does not run migrations automatically at startup — deliberately;
+this stays a human-triggered, reviewable action rather than something a deploy or a
+QStash job can set off unattended. **The habit that keeps it from going stale: run
+the workflow for every environment whenever a PR that adds a file under
+`migrations/versions/` merges to `main`**, before relying on anything that depends on
+it. Staging went several sessions behind head here before a job crashed on a column
+that had not been added yet.
+
+`GET /ready` makes drift visible without needing database access of your own: it
+reports `migration.applied` (the revision found in that database's own
+`alembic_version` table), `migration.expected` (this deployed code's own migration
+head, computed from `migrations/` rather than hand-maintained), and
+`migration.up_to_date`. A mismatch never turns `/ready` itself unhealthy — a database
+that answers is still ready to serve, and restarting the process fixes nothing a
+migration didn't already apply — but it is logged as `schema_migration_drift` and
+visible on the next request to anyone checking the URL.
 
 ## Quality checks
 

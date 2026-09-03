@@ -34,10 +34,18 @@ that request rather than independently recorded per claim; formal
 `verifications`/`verification_evidence` linkage is a deliberate later revisit,
 not an oversight.
 
-Staging's schema is still behind `main` — the "Database migrations" workflow has
-not been re-run since migration `0007`, so `0007`–`0011` (including the publish
-endpoint's dependencies) are not yet applied there. Run it for `staging` before
-exercising any of this against the deployed environment.
+Staging's schema is confirmed current: the "Database migrations" workflow has been
+re-run and the country sync (`sync_countries`) has been triggered and delivered
+successfully via a manual QStash publish.
+
+Staging went behind `main` once already without anyone noticing until a job crashed
+on a missing column. That must not happen quietly again: `GET /ready` now reports
+`migration.applied` against `migration.expected` (this code's own migration head,
+computed from `migrations/` rather than hand-maintained) on every request, and logs
+`schema_migration_drift` on a mismatch. The habit that keeps this closed going
+forward — re-run the "Database migrations" workflow for every environment whenever
+a PR adds a file under `migrations/versions/` merges to `main`, and check `/ready`
+after — belongs with the deploy step, not with memory.
 
 ## Phase 0 and deferred validation matrix
 
