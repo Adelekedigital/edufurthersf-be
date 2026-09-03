@@ -73,7 +73,8 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
             text(
                 "TRUNCATE searches, anonymous_sessions, join_requests, scholarship_cycles, "
                 "scholarship_revisions, scholarships, providers, processing_jobs, "
-                "review_tasks, discoveries, source_snapshots, source_pages, sources, "
+                "review_tasks, discoveries, discovery_quarantine, crawl_runs, "
+                "source_snapshots, source_pages, sources, "
                 "outbox_events, consumer_receipts, audit_log, verifications, countries, "
                 "verification_evidence RESTART IDENTITY CASCADE"
             )

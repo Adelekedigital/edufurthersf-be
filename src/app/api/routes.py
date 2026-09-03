@@ -98,8 +98,14 @@ async def require_internal_service(x_service_token: str | None = Header(default=
 async def import_feed(
     payload: FeedImportRequest, db: AsyncSession = Depends(get_db)
 ) -> FeedImportResponse:
-    accepted, duplicates, rejected = await import_feed_records(db, payload.records)
-    return FeedImportResponse(accepted=accepted, duplicates=duplicates, rejected=rejected)
+    outcome = await import_feed_records(db, payload.records)
+    return FeedImportResponse(
+        crawl_run_id=outcome.crawl_run_id,
+        imported=outcome.imported,
+        repeated=outcome.repeated,
+        changed=outcome.changed,
+        rejected=outcome.rejected,
+    )
 
 
 def _qstash_destination(request: Request, kind: str | None = None) -> str:

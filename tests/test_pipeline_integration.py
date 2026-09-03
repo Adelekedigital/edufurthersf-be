@@ -46,9 +46,9 @@ def _record(source_id, url: str, title: str) -> FeedRecord:
     return FeedRecord(source_id=source_id, url=url, title=title, excerpt="An award")
 
 
-async def test_import_counts_accepted_duplicate_and_rejected_rows(db) -> None:
+async def test_import_counts_imported_repeated_and_rejected_rows(db) -> None:
     source = await _source(db)
-    accepted, duplicates, rejected = await import_feed_records(
+    outcome = await import_feed_records(
         db,
         [
             _record(source.source_id, "https://example.test/a", "Award A"),
@@ -58,7 +58,7 @@ async def test_import_counts_accepted_duplicate_and_rejected_rows(db) -> None:
             _record(uuid.uuid4(), "https://example.test/c", "Unknown source"),
         ],
     )
-    assert (accepted, duplicates, rejected) == (2, 1, 1)
+    assert (outcome.imported, outcome.repeated, outcome.changed, outcome.rejected) == (2, 1, 0, 1)
     assert len(list(await db.scalars(select(Discovery)))) == 2
     # Lineage is preserved: one page per distinct normalised URL.
     assert len(list(await db.scalars(select(SourcePage)))) == 2
@@ -70,8 +70,8 @@ async def test_reimport_is_non_destructive(db) -> None:
     records = [_record(source.source_id, "https://example.test/a", "Award A")]
     first = await import_feed_records(db, records)
     second = await import_feed_records(db, records)
-    assert first == (1, 0, 0)
-    assert second == (0, 1, 0)
+    assert (first.imported, first.repeated, first.changed, first.rejected) == (1, 0, 0, 0)
+    assert (second.imported, second.repeated, second.changed, second.rejected) == (0, 1, 0, 0)
     assert len(list(await db.scalars(select(Discovery)))) == 1
 
 
