@@ -24,6 +24,11 @@ async def link_discovery(db: AsyncSession, discovery_id: uuid.UUID) -> LinkOutco
         discovery.processing_state = LinkOutcome.needs_review.value
         db.add(ReviewTask(discovery_id=discovery.discovery_id, reason=decision.reason, priority=50))
     else:
+        # A brand-new identity is still a decision a reviewer must make before
+        # it can ever be published. Against an empty or young catalogue this is
+        # the outcome nearly every discovery gets, so without a task here it
+        # would sit invisible - new_candidate has no other path into the queue.
         discovery.processing_state = LinkOutcome.new_candidate.value
+        db.add(ReviewTask(discovery_id=discovery.discovery_id, reason=decision.reason))
     await db.commit()
     return decision.outcome

@@ -156,6 +156,19 @@ async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> Im
                     correlation_id=str(crawl_run.crawl_run_id),
                 )
             )
+            # Without this, a discovery has no path to a reviewer at all:
+            # nothing else ever calls link_discovery for it, so it would sit at
+            # processing_state="normalized" forever no matter how many rows
+            # import. One discovery_id is only ever created once, so the key
+            # needs no further disambiguation.
+            db.add(
+                ProcessingJob(
+                    kind="link_canonical",
+                    dedupe_key=f"link:{discovery.discovery_id}",
+                    payload={"discovery_id": str(discovery.discovery_id)},
+                    correlation_id=str(crawl_run.crawl_run_id),
+                )
+            )
             if head is not None:
                 changed += 1
             else:
