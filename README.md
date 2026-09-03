@@ -59,12 +59,21 @@ POST https://api.example.com/api/v1/internal/jobs
 
 Put the job `kind` in the signed JSON body and set
 `QSTASH_EXPECTED_DESTINATION` to the complete callback URL, not just the API base
-URL. The older `/internal/jobs/{kind}` route remains for compatibility.
+URL. The older `/internal/jobs/{kind}` route remains for compatibility and expects
+that same URL with the kind appended.
+
+`QSTASH_EXPECTED_DESTINATION` is required for any deployment behind a platform
+proxy. QStash signs the public `https://` URL it was given, while the app is
+reached over plain HTTP from a private address, so the request URL the app
+reconstructs never matches the signature and every job is rejected with 401. Only
+local runs that QStash reaches directly may leave it unset.
 
 ### Rate limiting
 
-The current anonymous search limiter is process-local and suitable for local
-development or a single API instance. Before running multiple instances, use a
+The current anonymous search limiter is process-local and keys on the client IP,
+which the deployment image resolves by trusting the platform proxy's
+`X-Forwarded-For` (`FORWARDED_ALLOW_IPS`). It is suitable for local development or
+a single API instance. Before running multiple instances, use a
 Railway/platform-level limiter or replace it with a shared-store implementation.
 
 ## Database migrations

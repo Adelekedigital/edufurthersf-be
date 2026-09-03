@@ -85,8 +85,9 @@ Both endpoints must return HTTP 200 after migrations are applied.
 
 ### QStash
 
-Set `QSTASH_URL` to the account's regional endpoint and provide the current and next
-signing keys. Deliver one signed job to staging, verify it is accepted, then replay
+Set `QSTASH_URL` to the account's regional endpoint, set
+`QSTASH_EXPECTED_DESTINATION` to the public callback URL QStash publishes to, and
+provide the current and next signing keys. Deliver one signed job to staging, verify it is accepted, then replay
 the same delivery and confirm the job is not duplicated. Verify that a wrong-region
 endpoint and invalid signature are rejected.
 

@@ -62,28 +62,47 @@ async def import_feed(
     return FeedImportResponse(accepted=accepted, duplicates=duplicates, rejected=rejected)
 
 
-async def _receive_job(kind: str, request: Request, db: AsyncSession) -> JobResponse:
-    if kind not in ALLOWED_JOB_KINDS:
-        raise HTTPException(status_code=404, detail="Unknown job kind")
+def _qstash_destination(request: Request, kind: str | None = None) -> str:
+    """Return the URL QStash signed as `sub`.
+
+    `request.url` only reconstructs that URL when the app is reached directly;
+    a platform proxy leaves the scheme and host rewritten, so the configured
+    public callback URL wins whenever it is set.
+    """
+    configured = get_settings().qstash_expected_destination
+    if not configured:
+        return str(request.url)
+    if kind is None:
+        return configured
+    return f"{configured.rstrip('/')}/{kind}"
+
+
+async def _verified_job_body(request: Request, destination: str) -> bytes:
+    """Return the raw body only once a QStash signature covers it."""
     raw_body = await request.body()
     settings = get_settings()
     verifier = QStashVerifier(
         QStashVerificationConfig(
             settings.qstash_current_signing_key,
             settings.qstash_next_signing_key,
-            settings.qstash_expected_destination or str(request.url),
+            destination,
         )
     )
-    if not verifier.verify(
-        raw_body=raw_body,
-        signature=request.headers.get("Upstash-Signature"),
-        destination=str(request.url),
-    ):
+    if not verifier.verify(raw_body=raw_body, signature=request.headers.get("Upstash-Signature")):
         raise HTTPException(status_code=401, detail="Invalid QStash signature")
+    return raw_body
+
+
+def _parse_job(raw_body: bytes) -> JobRequest:
     try:
-        job_request = JobRequest.model_validate_json(raw_body)
+        return JobRequest.model_validate_json(raw_body)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid job payload") from exc
+
+
+async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobResponse:
+    if kind not in ALLOWED_JOB_KINDS:
+        raise HTTPException(status_code=404, detail="Unknown job kind")
     job, created = await enqueue_job(db, kind, job_request.dedupe_key, job_request.payload)
     return JobResponse(job_id=job.job_id, state=job.state, created=created)
 
@@ -91,14 +110,11 @@ async def _receive_job(kind: str, request: Request, db: AsyncSession) -> JobResp
 @router.post("/internal/jobs", response_model=JobResponse)
 async def receive_fixed_job(request: Request, db: AsyncSession = Depends(get_db)) -> JobResponse:
     """Receive every QStash job at one stable, signature-bound destination."""
-    raw_body = await request.body()
-    try:
-        job_request = JobRequest.model_validate_json(raw_body)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Invalid job payload") from exc
+    raw_body = await _verified_job_body(request, _qstash_destination(request))
+    job_request = _parse_job(raw_body)
     if not job_request.kind:
         raise HTTPException(status_code=422, detail="Job kind is required")
-    return await _receive_job(job_request.kind, request, db)
+    return await _enqueue(job_request.kind, job_request, db)
 
 
 @router.post("/internal/jobs/{kind}", response_model=JobResponse)
@@ -106,7 +122,8 @@ async def receive_job(
     kind: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> JobResponse:
     """Compatibility route; new QStash destinations should use `/internal/jobs`."""
-    return await _receive_job(kind, request, db)
+    raw_body = await _verified_job_body(request, _qstash_destination(request, kind))
+    return await _enqueue(kind, _parse_job(raw_body), db)
 
 
 @router.post(
