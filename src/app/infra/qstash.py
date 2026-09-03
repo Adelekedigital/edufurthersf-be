@@ -1,5 +1,4 @@
 import base64
-import binascii
 import hashlib
 import hmac
 from dataclasses import dataclass
@@ -43,15 +42,13 @@ def decode_body_claim(value: str) -> bytes | None:
     one `=` of padding, and encoders differ on the URL-safe alphabet, so decode
     to bytes and compare digests rather than comparing encoded strings.
     """
-    padded = value + "=" * (-len(value) % 4)
-    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
-        try:
-            digest = decoder(padded)
-        except ValueError, binascii.Error:
-            continue
-        if len(digest) == hashlib.sha256().digest_size:
-            return digest
-    return None
+    try:
+        # urlsafe_b64decode maps -/_ onto +// first, so it accepts either
+        # alphabet; a wrong-length result is rejected by the digest check.
+        digest = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except ValueError:
+        return None
+    return digest if len(digest) == hashlib.sha256().digest_size else None
 
 
 def publish_url(qstash_url: str) -> str:

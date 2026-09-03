@@ -1,7 +1,11 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The placeholder cursor key that require_deployed_secrets refuses to boot with.
+DEVELOPMENT_CURSOR_PLACEHOLDER = "development-only-change-me"
+DEPLOYED_ENVIRONMENTS = frozenset({"staging", "production"})
 
 
 def normalize_database_url(value: str) -> str:
@@ -39,6 +43,25 @@ class Settings(BaseSettings):
     @classmethod
     def use_async_database_driver(cls, value: str) -> str:
         return normalize_database_url(value)
+
+    @model_validator(mode="after")
+    def require_deployed_secrets(self) -> Settings:
+        """Refuse to boot a deployed environment with placeholder secrets.
+
+        Shipping the development cursor key would let anyone mint pagination
+        cursors, and it is the kind of default that survives to production
+        precisely because nothing complains about it.
+        """
+        if self.environment.lower() in DEPLOYED_ENVIRONMENTS:
+            if self.cursor_secret == DEVELOPMENT_CURSOR_PLACEHOLDER:
+                raise ValueError("CURSOR_SECRET must be set outside development")
+            if not self.qstash_expected_destination:
+                raise ValueError("QSTASH_EXPECTED_DESTINATION must be set outside development")
+        return self
+
+    @property
+    def is_deployed(self) -> bool:
+        return self.environment.lower() in DEPLOYED_ENVIRONMENTS
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

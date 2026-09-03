@@ -17,7 +17,22 @@ def get_engine():
     )
 
 
+@lru_cache
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
+
+
 async def get_db() -> AsyncGenerator[AsyncSession]:
-    session_factory = async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
-    async with session_factory() as session:
-        yield session
+    """Yield a request-scoped session that commits only on a clean response.
+
+    Without this the request handlers flushed their writes and the session
+    closed without committing, so anonymous sessions and search history were
+    silently discarded and every later lookup of them missed.
+    """
+    async with get_session_factory()() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise

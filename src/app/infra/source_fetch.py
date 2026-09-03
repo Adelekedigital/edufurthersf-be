@@ -16,18 +16,30 @@ class FetchedSource:
     content_type: str
 
 
+# Shared address space (RFC 6598). CPython stopped reporting this as private
+# in 3.12.4, and it is exactly where this deployment's platform proxy and
+# sibling services live, so it must be excluded explicitly.
+_CARRIER_GRADE_NAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_public_address(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    if ip.version == 4 and ip in _CARRIER_GRADE_NAT:
+        return False
+    # is_global still reports multicast as global, so exclude it explicitly.
+    if ip.is_multicast or ip.is_unspecified:
+        return False
+    # Otherwise allowlist: anything not globally routable is refused, rather
+    # than enumerating the non-routable ranges and missing one.
+    return ip.is_global
+
+
 def _is_public_host(hostname: str) -> bool:
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, None)}
+        addresses = {str(item[4][0]) for item in socket.getaddrinfo(hostname, None)}
     except socket.gaierror as exc:
         raise ValueError("Source hostname could not be resolved") from exc
-    return all(
-        not (ip := ipaddress.ip_address(address)).is_private
-        and not ip.is_loopback
-        and not ip.is_link_local
-        and not ip.is_reserved
-        for address in addresses
-    )
+    return bool(addresses) and all(_is_public_address(address) for address in addresses)
 
 
 def validate_source_url(url: str, approved_domains: list[str]) -> str:

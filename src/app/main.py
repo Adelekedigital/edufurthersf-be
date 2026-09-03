@@ -21,7 +21,15 @@ initialize_sentry(
     settings.sentry_traces_sample_rate,
 )
 logger = logging.getLogger("app.http")
-app = FastAPI(title="Edufurther Scholarship Finder", version=settings.app_version)
+# The schema documents the internal and admin routes, so it stays off in
+# deployed environments even though those routes are themselves authenticated.
+app = FastAPI(
+    title="Edufurther Scholarship Finder",
+    version=settings.app_version,
+    docs_url=None if settings.is_deployed else "/docs",
+    redoc_url=None if settings.is_deployed else "/redoc",
+    openapi_url=None if settings.is_deployed else "/openapi.json",
+)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
 app.include_router(router, prefix="/api/v1")

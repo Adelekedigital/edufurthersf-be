@@ -27,8 +27,10 @@ def test_compatibility_route_appends_the_job_kind(monkeypatch) -> None:
     assert _qstash_destination(proxied, "import_feed") == f"{PUBLIC}/import_feed"
 
 
-def test_unconfigured_destination_falls_back_to_the_request_url(monkeypatch) -> None:
+def test_unconfigured_destination_fails_closed(monkeypatch) -> None:
+    # Falling back to request.url would bind the signature to a Host header the
+    # caller controls once the platform proxy is trusted.
     _with_destination(monkeypatch, "")
     local = _request("http://localhost:8000/api/v1/internal/jobs")
-    assert _qstash_destination(local) == "http://localhost:8000/api/v1/internal/jobs"
-    assert _qstash_destination(local, "import_feed") == "http://localhost:8000/api/v1/internal/jobs"
+    assert _qstash_destination(local) == ""
+    assert _qstash_destination(local, "import_feed") == ""

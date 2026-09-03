@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -27,8 +28,9 @@ from app.api.schemas import (
 from app.core.config import get_settings
 from app.core.cursors import decode_cursor, encode_cursor
 from app.core.rate_limit import InMemoryRateLimiter
-from app.domain.matching import SearchProfile, evaluate_match
+from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
 from app.domain.models import JoinRequest, RecordState, Scholarship, ScholarshipCycle, Search
+from app.domain.return_urls import is_allowed_return_url
 from app.domain.status import evaluate_public_status
 from app.domain.taxonomy import TAXONOMY, normalize_search_filters
 from app.infra.core_client import CoreJoinClient
@@ -37,18 +39,23 @@ from app.infra.ingestion import import_feed_records
 from app.infra.jobs import enqueue_job
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
-from app.infra.sessions import get_or_create_session, record_search
+from app.infra.sessions import SESSION_COOKIE, get_or_create_session, record_search
 
 logger = logging.getLogger("app.api")
 router = APIRouter()
 search_limiter = InMemoryRateLimiter()
+# The join path is far more expensive than a search: it calls Core.
+JOIN_INTENTS_PER_MINUTE = 5
+join_limiter = InMemoryRateLimiter()
 
 
 async def require_internal_service(x_service_token: str | None = Header(default=None)) -> None:
     from app.core.config import get_settings
 
     expected = get_settings().internal_service_token
-    if not expected or x_service_token != expected:
+    # Constant time: a short-circuiting compare leaks the token byte by byte to
+    # anyone close enough to measure, and the platform proxy is that close.
+    if not expected or not hmac.compare_digest(x_service_token or "", expected):
         raise HTTPException(status_code=401, detail="Internal service authentication required")
 
 
@@ -73,7 +80,11 @@ def _qstash_destination(request: Request, kind: str | None = None) -> str:
     """
     configured = get_settings().qstash_expected_destination
     if not configured:
-        return str(request.url)
+        # Fail closed. `request.url` is rebuilt from the Host header and
+        # X-Forwarded-Proto, both attacker-supplied once the platform proxy is
+        # trusted, which would reduce the `sub` binding to a path comparison
+        # and let a signature issued for one environment replay against another.
+        return ""
     if kind is None:
         return configured
     return f"{configured.rstrip('/')}/{kind}"
@@ -161,6 +172,43 @@ async def review_decision(
     )
 
 
+def _search_result(
+    row: ScholarshipCycle, decision: MatchDecision, evaluated_at: datetime
+) -> SearchResult:
+    """Build one public result, re-deriving status at read time.
+
+    A stored `open_verified` whose deadline or freshness boundary has passed
+    must not be returned as open just because no sweep has run yet; search
+    previously returned the stored value untouched while the detail endpoint
+    re-evaluated it, so the two disagreed and search could claim a closed
+    award was open.
+    """
+    facts = row.facts or {}
+    deadline_at = facts.get("deadline_at")
+    status = evaluate_public_status(
+        row.public_status,
+        deadline_at=datetime.fromisoformat(deadline_at) if deadline_at else None,
+        status_valid_until=row.status_valid_until,
+        now=evaluated_at,
+    )
+    caveats = list(decision.caveats)
+    if status != row.public_status:
+        caveats.append("Current status evidence requires re-verification.")
+    return SearchResult(
+        scholarship_id=row.scholarship_id,
+        cycle_id=row.cycle_id,
+        name=row.scholarship.name if row.scholarship else "",
+        provider=row.scholarship.provider.name
+        if row.scholarship and row.scholarship.provider
+        else "",
+        status=status.value,
+        fit=cast(Literal["confirmed", "possible"], decision.fit),
+        official_url=row.official_cycle_url,
+        last_verified_at=row.last_verified_at,
+        caveats=caveats,
+    )
+
+
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     facts = row.facts or {}
     deadline_at = facts.get("deadline_at")
@@ -199,12 +247,18 @@ async def taxonomies() -> TaxonomiesResponse:
 
 @router.post("/join-intents", response_model=JoinIntentResponse)
 async def create_join_intent(
-    payload: JoinIntentRequest, db: AsyncSession = Depends(get_db)
+    payload: JoinIntentRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> JoinIntentResponse:
     """Create a consented, idempotent handoff from Finder to the Core product."""
     if not payload.consent:
         raise HTTPException(status_code=422, detail="Consent is required")
     settings = get_settings()
+    session = await get_or_create_session(db, response, request.cookies.get(SESSION_COOKIE))
+    if not join_limiter.allow(str(session.session_id), JOIN_INTENTS_PER_MINUTE):
+        raise HTTPException(status_code=429, detail="Join request rate limit exceeded")
     if not all(
         (
             settings.core_join_intent_url,
@@ -216,9 +270,17 @@ async def create_join_intent(
             status_code=503, detail="Core join-intent integration is not configured"
         )
     return_url = str(payload.return_url)
-    if not return_url.startswith(settings.core_allowed_return_url_prefix or ""):
+    if not is_allowed_return_url(return_url, settings.core_allowed_return_url_prefix or ""):
         raise HTTPException(status_code=422, detail="Return URL is not allowed")
-    search = await db.scalar(select(Search).where(Search.search_id == payload.search_id))
+    # A search may only be handed to Core by the session that ran it. Without
+    # this the search id alone was enough for anyone to transfer another
+    # visitor's filters and receive their continue URL and handoff token.
+    search = await db.scalar(
+        select(Search).where(
+            Search.search_id == payload.search_id,
+            Search.session_id == session.session_id,
+        )
+    )
     if search is None:
         raise HTTPException(status_code=404, detail="Search not found")
     existing = await db.scalar(
@@ -260,9 +322,9 @@ async def search(
     payload: SearchRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> SearchResponse:
     settings = get_settings()
-    limiter_key = request.cookies.get("finder_session") or (
-        request.client.host if request.client else "unknown"
-    )
+    # Key on the client address, not the cookie: an unauthenticated caller
+    # chooses its own cookie value and could mint a fresh bucket per request.
+    limiter_key = request.client.host if request.client else "unknown"
     if not search_limiter.allow(limiter_key, settings.api_rate_limit_per_minute):
         raise HTTPException(status_code=429, detail="Search rate limit exceeded")
     evaluated_at = datetime.now(UTC)
@@ -279,7 +341,7 @@ async def search(
         "program_level": degree,
         "field": field,
     }
-    session = await get_or_create_session(db, response, request.cookies.get("finder_session"))
+    session = await get_or_create_session(db, response, request.cookies.get(SESSION_COOKIE))
     search_id = await record_search(db, session, filters)
     filter_digest = hashlib.sha256(
         json.dumps(filters, sort_keys=True, separators=(",", ":")).encode()
@@ -299,30 +361,26 @@ async def search(
     )
     rows = result.scalars().all()
     matched: list[SearchResult] = [
-        SearchResult(
-            scholarship_id=row.scholarship_id,
-            cycle_id=row.cycle_id,
-            name=row.scholarship.name if row.scholarship else "",
-            provider=row.scholarship.provider.name
-            if row.scholarship and row.scholarship.provider
-            else "",
-            status=row.public_status.value,
-            fit=cast(Literal["confirmed", "possible"], decision.fit),
-            official_url=row.official_cycle_url,
-            last_verified_at=row.last_verified_at,
-            caveats=list(decision.caveats),
-        )
+        _search_result(row, decision, evaluated_at)
         for row in rows
         if (decision := evaluate_match(profile, row.facts)) is not None
     ]
     status_rank = {"open_verified": 0, "expected_to_reopen": 1, "status_unknown": 2}
+    # Confirmed matches outrank possible ones inside a status group. The
+    # previous key sorted by negative caveat count, which put the
+    # eligibility-uncertain records first.
+    fit_rank = {"confirmed": 0, "possible": 1}
     matched.sort(
         key=lambda item: (
+            fit_rank.get(item.fit, 9),
             status_rank.get(item.status, 9),
-            -len(item.caveats),
             str(item.scholarship_id),
         )
     )
+    confirmed_counts: dict[str, int] = {}
+    for item in matched:
+        if item.fit == "confirmed":
+            confirmed_counts[item.status] = confirmed_counts.get(item.status, 0) + 1
     data = matched[offset : offset + payload.limit]
     next_cursor = (
         encode_cursor(offset + payload.limit, filter_digest, settings.cursor_secret)
@@ -335,7 +393,7 @@ async def search(
         meta=SearchMeta(
             search_id=search_id,
             evaluated_at=evaluated_at,
-            confirmed_counts={},
+            confirmed_counts=confirmed_counts,
             possible_match_count=sum(item.fit == "possible" for item in matched),
             warnings=[],
         ),
