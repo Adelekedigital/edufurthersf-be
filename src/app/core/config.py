@@ -1,6 +1,18 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(value: str) -> str:
+    """Use the asyncpg driver even when a host supplies a generic Postgres URL."""
+    if value.startswith("postgres://"):
+        return "postgresql+asyncpg://" + value.removeprefix("postgres://")
+    if value.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + value.removeprefix("postgresql://")
+    if value.startswith("postgresql+psycopg2://"):
+        return "postgresql+asyncpg://" + value.removeprefix("postgresql+psycopg2://")
+    return value
 
 
 class Settings(BaseSettings):
@@ -21,6 +33,11 @@ class Settings(BaseSettings):
     core_allowed_return_url_prefix: str | None = None
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
+
+    @field_validator("database_url")
+    @classmethod
+    def use_async_database_driver(cls, value: str) -> str:
+        return normalize_database_url(value)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
