@@ -5,8 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models import Discovery
 from app.domain.normalization import normalize_discovery
-from app.infra.jobs import claim_job_for_execution, complete_job, fail_job_for_execution
+from app.infra.jobs import (
+    claim_job_for_execution,
+    complete_job,
+    fail_job_for_execution,
+    reconcile_stuck_jobs,
+)
 from app.infra.linking import link_discovery
+from app.infra.outbox import dispatch_analytics_events
 from app.infra.source_persistence import fetch_and_persist_page
 
 
@@ -20,6 +26,10 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await link_discovery(db, uuid.UUID(job.payload["discovery_id"]))
         elif job.kind == "fetch_source_page":
             await fetch_and_persist_page(db, uuid.UUID(job.payload["page_id"]))
+        elif job.kind == "dispatch_outbox":
+            await dispatch_analytics_events(db)
+        elif job.kind == "reconcile_stuck_jobs":
+            await reconcile_stuck_jobs(db)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.

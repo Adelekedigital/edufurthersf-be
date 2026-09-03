@@ -1,15 +1,14 @@
 import asyncio
-import hashlib
 import hmac
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Literal, cast
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from sqlalchemy import select, text
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,7 +16,14 @@ from app.api.detail_schemas import ScholarshipDetailResponse
 from app.api.ingestion_schemas import FeedImportRequest, FeedImportResponse
 from app.api.job_schemas import JobRequest, JobResponse
 from app.api.join_schemas import JoinIntentRequest, JoinIntentResponse
-from app.api.review_schemas import ReviewDecisionRequest, ReviewDecisionResponse
+from app.api.review_schemas import (
+    ReviewDecisionRequest,
+    ReviewDecisionResponse,
+    ReviewQueueResponse,
+    ReviewTaskSummary,
+    WithdrawRequest,
+    WithdrawResponse,
+)
 from app.api.schemas import (
     SearchMeta,
     SearchRequest,
@@ -28,19 +34,36 @@ from app.api.schemas import (
 )
 from app.core.config import get_settings
 from app.core.cursors import decode_cursor, encode_cursor
+from app.core.ids import new_uuid7
 from app.core.rate_limit import InMemoryRateLimiter
 from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
-from app.domain.models import JoinRequest, RecordState, Scholarship, ScholarshipCycle, Search
+from app.domain.models import (
+    Discovery,
+    JoinRequest,
+    RecordState,
+    ReviewTask,
+    Scholarship,
+    ScholarshipCycle,
+    Search,
+)
 from app.domain.return_urls import is_allowed_return_url
+from app.domain.snapshots import build_result_snapshot
 from app.domain.status import evaluate_public_status
 from app.domain.taxonomy import TAXONOMY, normalize_search_filters
 from app.infra.core_client import CoreJoinClient
 from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import enqueue_job
+from app.infra.outbox import enqueue_analytics_event
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
-from app.infra.sessions import SESSION_COOKIE, get_or_create_session, record_search
+from app.infra.sessions import (
+    SESSION_COOKIE,
+    filter_digest,
+    get_or_create_session,
+    record_search_response,
+)
+from app.infra.withdrawals import withdraw_scholarship
 
 logger = logging.getLogger("app.api")
 router = APIRouter()
@@ -51,6 +74,8 @@ JOIN_INTENTS_PER_MINUTE = 5
 # Comfortably above the 150-record launch target and the 300-record maturity
 # target; passing it emits a warning instead of silently truncating results.
 PUBLISHED_CYCLE_SCAN_LIMIT = 2000
+#: Version of the deterministic ranking policy recorded with every response.
+MATCH_POLICY_VERSION = "match-v1"
 join_limiter = InMemoryRateLimiter()
 
 
@@ -214,6 +239,78 @@ def _search_result(
     )
 
 
+@router.get(
+    "/internal/admin/reviews",
+    response_model=ReviewQueueResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def review_queue(
+    state: Literal["open", "resolved"] = "open",
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewQueueResponse:
+    """The reviewer's work list, highest priority and oldest first."""
+    rows = list(
+        await db.execute(
+            select(ReviewTask, Discovery.raw_title)
+            .outerjoin(Discovery, Discovery.discovery_id == ReviewTask.discovery_id)
+            .where(ReviewTask.state == state)
+            .order_by(ReviewTask.priority, ReviewTask.created_at)
+            .limit(limit)
+        )
+    )
+    open_count = await db.scalar(
+        select(func.count()).select_from(ReviewTask).where(ReviewTask.state == "open")
+    )
+    return ReviewQueueResponse(
+        data=[
+            ReviewTaskSummary(
+                review_task_id=task.review_task_id,
+                reason=task.reason,
+                priority=task.priority,
+                state=task.state,
+                discovery_id=task.discovery_id,
+                revision_id=task.revision_id,
+                raw_title=raw_title,
+                created_at=task.created_at,
+            )
+            for task, raw_title in rows
+        ],
+        open_count=int(open_count or 0),
+    )
+
+
+@router.post(
+    "/internal/admin/scholarships/{scholarship_id}/withdraw",
+    response_model=WithdrawResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def withdraw(
+    scholarship_id: uuid.UUID,
+    payload: WithdrawRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> WithdrawResponse:
+    """Remove a misleading published record from public results immediately."""
+    try:
+        cycles = await withdraw_scholarship(
+            db, scholarship_id, reason=payload.reason, actor="internal_service"
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    logger.warning(
+        "scholarship_withdrawn",
+        extra={"request_id": getattr(request.state, "request_id", "")},
+    )
+    return WithdrawResponse(
+        scholarship_id=scholarship_id,
+        lifecycle_state=RecordState.withdrawn.value,
+        withdrawn_cycles=cycles,
+    )
+
+
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     facts = row.facts or {}
     deadline_at = facts.get("deadline_at")
@@ -333,6 +430,7 @@ async def search(
     if not search_limiter.allow(limiter_key, settings.api_rate_limit_per_minute):
         raise HTTPException(status_code=429, detail="Search rate limit exceeded")
     evaluated_at = datetime.now(UTC)
+    started = perf_counter()
     try:
         origin, destinations, degree, field = normalize_search_filters(
             payload.origin_country, payload.target_countries, payload.program_level, payload.field
@@ -347,16 +445,17 @@ async def search(
         "field": field,
     }
     session = await get_or_create_session(db, response, request.cookies.get(SESSION_COOKIE))
-    search_id = await record_search(db, session, filters)
-    filter_digest = hashlib.sha256(
-        json.dumps(filters, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    digest = filter_digest(filters)
+    # A fresh submission starts a new logical search; a page request keeps the
+    # one its cursor carries, so pagination is not counted as several searches.
     offset = 0
+    search_id = new_uuid7()
     if payload.cursor:
         try:
-            offset = decode_cursor(payload.cursor, filter_digest, settings.cursor_secret)
+            cursor_state = decode_cursor(payload.cursor, digest, settings.cursor_secret)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        offset, search_id = cursor_state.offset, cursor_state.search_id
     result = await db.execute(
         select(ScholarshipCycle)
         .join(ScholarshipCycle.scholarship)
@@ -398,16 +497,66 @@ async def search(
         if item.fit == "confirmed":
             confirmed_counts[item.status] = confirmed_counts.get(item.status, 0) + 1
     data = matched[offset : offset + payload.limit]
+    has_next_page = offset + payload.limit < len(matched)
     next_cursor = (
-        encode_cursor(offset + payload.limit, filter_digest, settings.cursor_secret)
-        if offset + payload.limit < len(matched)
+        encode_cursor(offset + payload.limit, digest, search_id, settings.cursor_secret)
+        if has_next_page
         else None
     )
+    page_number = offset // payload.limit + 1
+    snapshot = build_result_snapshot(
+        [item.model_dump() for item in data],
+        evaluated_at=evaluated_at,
+        match_policy_version=MATCH_POLICY_VERSION,
+        taxonomy_version=TAXONOMY.version,
+        page_number=page_number,
+        requested_limit=payload.limit,
+        total_match_count=len(matched),
+        has_next_page=has_next_page,
+        warnings=warnings,
+    )
+    stored = await record_search_response(
+        db,
+        session=session,
+        search_id=search_id,
+        filters=filters,
+        filter_digest=digest,
+        snapshot=snapshot,
+        evaluated_at=evaluated_at,
+        page_number=page_number,
+        requested_limit=payload.limit,
+        returned_count=len(data),
+        total_match_count=len(matched),
+        duration_ms=round((perf_counter() - started) * 1000),
+    )
+    if page_number == 1:
+        # Only the first response of a logical search is a completed search.
+        # Later pages must not inflate the funnel, and a re-requested page one
+        # must not emit a second event, so the event is keyed on the search.
+        await enqueue_analytics_event(
+            db,
+            event_type="scholarship_search_completed",
+            dedupe_key=f"search_completed:{search_id}",
+            payload={
+                "search_id": str(search_id),
+                "response_id": str(stored.id),
+                "filters": filters,
+                "total_match_count": len(matched),
+                "confirmed_counts": confirmed_counts,
+                "possible_match_count": sum(item.fit == "possible" for item in matched),
+                "match_policy_version": MATCH_POLICY_VERSION,
+                "taxonomy_version": TAXONOMY.version,
+            },
+        )
+    # The row and its event commit with the response. get_db commits on a clean
+    # return, so a failure here surfaces as an error rather than a success whose
+    # history was never durably recorded.
     return SearchResponse(
         data=data,
         next_cursor=next_cursor,
         meta=SearchMeta(
             search_id=search_id,
+            response_id=stored.id,
             evaluated_at=evaluated_at,
             confirmed_counts=confirmed_counts,
             possible_match_count=sum(item.fit == "possible" for item in matched),
