@@ -15,6 +15,8 @@ _EXTRA_FIELDS = (
     "expected_destination",
     "signed_destination",
     "job_kind",
+    "applied_revision",
+    "expected_revision",
 )
 
 

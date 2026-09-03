@@ -11,6 +11,7 @@ from app.core.errors import http_exception_handler, problem, validation_exceptio
 from app.core.observability import configure_logging, new_request_id, request_duration
 from app.core.sentry import initialize_sentry
 from app.infra.db import get_db
+from app.infra.migration_status import migration_status
 
 settings = get_settings()
 configure_logging()
@@ -72,4 +73,16 @@ async def ready(request: Request, db: AsyncSession = Depends(get_db)):
             title="Dependency not ready",
             detail="The scholarship database is not available.",
         )
-    return {"status": "ready"}
+    # Informational, not part of the readiness verdict: a database that
+    # answers is ready to serve regardless of schema drift, and 503-ing on
+    # drift would restart a process that a restart cannot fix.
+    status = await migration_status(db)
+    if status["up_to_date"] is False:
+        logger.warning(
+            "schema_migration_drift",
+            extra={
+                "applied_revision": status["applied"] or "",
+                "expected_revision": status["expected"] or "",
+            },
+        )
+    return {"status": "ready", "migration": status}
