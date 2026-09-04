@@ -73,6 +73,7 @@ from app.infra.sessions import (
 )
 from app.infra.sources import create_source, list_sources
 from app.infra.withdrawals import withdraw_scholarship
+from app.infra.worker import execute_job
 
 logger = logging.getLogger("app.api")
 router = APIRouter()
@@ -207,10 +208,33 @@ def _parse_job(raw_body: bytes) -> JobRequest:
 
 
 async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobResponse:
+    """Enqueue a job, then run it before acknowledging the delivery.
+
+    Acknowledge success only after durable completion: enqueuing and returning
+    200 without running anything left every QStash-delivered job sitting at
+    `queued` forever, since nothing else in the deployed app ever called
+    execute_job. A replayed delivery for a job that already exists reports its
+    stored state without re-running it - claim_job's own state machine already
+    refuses to re-execute anything not queued or due for retry, so this only
+    avoids surfacing that refusal as a 502 on every retry QStash sends.
+    """
     if kind not in ALLOWED_JOB_KINDS:
         raise HTTPException(status_code=404, detail="Unknown job kind")
     job, created = await enqueue_job(db, kind, job_request.dedupe_key, job_request.payload)
-    return JobResponse(job_id=job.job_id, state=job.state, created=created)
+    if not created:
+        return JobResponse(job_id=job.job_id, state=job.state, created=created)
+    try:
+        state = await execute_job(db, job.job_id)
+    except Exception as exc:
+        await db.refresh(job)
+        # execute_job already recorded the failure durably (retry_wait or
+        # failed_review) before re-raising. A retryable non-2xx lets QStash's
+        # own retry schedule take over rather than reporting the enqueue as
+        # successful while the work behind it failed.
+        raise HTTPException(
+            status_code=502, detail=f"Job execution failed: {job.last_error or exc}"
+        ) from exc
+    return JobResponse(job_id=job.job_id, state=state, created=created)
 
 
 @router.post("/internal/jobs", response_model=JobResponse)
