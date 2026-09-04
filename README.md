@@ -107,23 +107,29 @@ request (`evidence_fresh`) rather than independently recorded per claim today.
 Formal per-claim `verifications`/`verification_evidence` linkage, which the data
 standard's 100%-evidence-compliance gate ultimately needs, is deferred.
 
-### Jobs feed import creates are not delivered to QStash
+### Every job import creates is published to QStash
 
-`import_feed_records` writes `normalize_discovery`/`link_canonical`
-`ProcessingJob` rows directly - it never publishes them to QStash. Only a real
-QStash delivery to `/internal/jobs` executes a job, so an import's own jobs sit
-at `queued` forever unless something else runs them. This is the gap that left
-247 real discoveries with an empty review queue on staging: the rows existed,
-their jobs never had.
+`import_feed_records` writes each `normalize_discovery`/`link_canonical`
+`ProcessingJob` row, and once the batch's transaction has actually committed,
+publishes a matching QStash message for it (`QStashPublisher`, keyed by the same
+`dedupe_key` as both the app-level and QStash's own deduplication). QStash then
+delivers it back to `/internal/jobs`, which executes it inline. Publishing only
+ever happens after the commit succeeds: publishing first would risk QStash
+delivering a callback for a `ProcessingJob` - and the `Discovery` its payload
+references - that a rollback made never exist.
+
+This is best-effort per job. If `QSTASH_TOKEN`/`QSTASH_EXPECTED_DESTINATION`
+are not configured (local dev, tests), or QStash is briefly unreachable,
+publishing is skipped or logged (`qstash_dispatch_failed`) rather than failing
+the import - the local `ProcessingJob` row already exists either way.
 
 `POST /internal/admin/jobs/run-due` (optional `?limit=`, default 200, max 1000)
-executes every job currently due - queued, or `retry_wait` past its backoff -
-and reports `{completed, failed, remaining}`. Safe to call repeatedly: a job
-already completed, or not yet due for retry, is not selected again, so calling
-it after an import is the manual equivalent of the recurring schedule that
-would otherwise do this automatically. Publishing each job to QStash on
-creation (closing this permanently, without a manual step) remains a follow-up;
-`QStashPublisher` already exists for it and is not yet wired into ingestion.
+remains the manual recovery path: it executes every job currently due -
+queued, or `retry_wait` past its backoff - and reports `{completed, failed,
+remaining}`. Safe to call repeatedly. This is what closed the gap that left
+247 real discoveries with an empty review queue on staging before jobs were
+published to QStash on creation at all - their rows existed, but nothing had
+ever triggered execution for them.
 
 ## Configuration
 

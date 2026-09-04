@@ -1,11 +1,15 @@
+import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ingestion_schemas import FeedRecord
+from app.core.config import get_settings
 from app.domain.ingestion import prepare_candidate
 from app.domain.models import (
     CrawlRun,
@@ -16,6 +20,9 @@ from app.domain.models import (
     SourcePage,
 )
 from app.domain.normalization import normalize_discovery
+from app.infra.qstash import QStashPublisher
+
+logger = logging.getLogger("app.infra.ingestion")
 
 
 @dataclass(frozen=True)
@@ -25,6 +32,13 @@ class ImportOutcome:
     repeated: int
     changed: int
     rejected: int
+
+
+@dataclass(frozen=True)
+class _PendingJob:
+    kind: str
+    dedupe_key: str
+    payload: dict[str, Any]
 
 
 async def _quarantine(
@@ -53,6 +67,41 @@ async def _quarantine(
     )
 
 
+async def _dispatch_pending_jobs(pending: list[_PendingJob]) -> None:
+    """Publish each freshly committed job to QStash so `/internal/jobs`
+    actually executes it, instead of leaving it at `state=queued` until
+    someone calls the manual `run-due` stopgap.
+
+    Only ever called after the caller's own commit has already succeeded:
+    publishing before that would risk QStash delivering a callback for a
+    ProcessingJob - and the Discovery its payload references - that a
+    rollback made never exist.
+
+    Best-effort per job: QStash being briefly unreachable must not turn a
+    successful import into a failed one. The local ProcessingJob row still
+    exists either way, so `run-due` remains the safety net for anything that
+    does not get dispatched here.
+    """
+    settings = get_settings()
+    if not settings.qstash_token or not settings.qstash_expected_destination:
+        # Local/test environments without QStash configured fall back to the
+        # manual run-due stopgap entirely - expected, not an error.
+        return
+    publisher = QStashPublisher(settings.qstash_url, settings.qstash_token)
+
+    async def _publish_one(job: _PendingJob) -> None:
+        try:
+            await publisher.publish(
+                settings.qstash_expected_destination,
+                {"kind": job.kind, "dedupe_key": job.dedupe_key, "payload": job.payload},
+                deduplication_id=job.dedupe_key,
+            )
+        except Exception:
+            logger.warning("qstash_dispatch_failed", extra={"job_kind": job.kind})
+
+    await asyncio.gather(*(_publish_one(job) for job in pending))
+
+
 async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> ImportOutcome:
     """Import one batch of feed rows under a single crawl run.
 
@@ -74,6 +123,7 @@ async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> Im
     await db.flush()
 
     imported = repeated = changed = rejected = 0
+    pending_jobs: list[_PendingJob] = []
     try:
         for record in records:
             try:
@@ -148,27 +198,38 @@ async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> Im
             )
             db.add(discovery)
             await db.flush()
+
+            normalize_payload = {"discovery_id": str(discovery.discovery_id)}
+            normalize_dedupe_key = f"normalize:{discovery.discovery_id}:{normalized.identity_key}"
             db.add(
                 ProcessingJob(
                     kind="normalize_discovery",
-                    dedupe_key=f"normalize:{discovery.discovery_id}:{normalized.identity_key}",
-                    payload={"discovery_id": str(discovery.discovery_id)},
+                    dedupe_key=normalize_dedupe_key,
+                    payload=normalize_payload,
                     correlation_id=str(crawl_run.crawl_run_id),
                 )
             )
+            pending_jobs.append(
+                _PendingJob("normalize_discovery", normalize_dedupe_key, normalize_payload)
+            )
+
             # Without this, a discovery has no path to a reviewer at all:
             # nothing else ever calls link_discovery for it, so it would sit at
             # processing_state="normalized" forever no matter how many rows
             # import. One discovery_id is only ever created once, so the key
             # needs no further disambiguation.
+            link_payload = {"discovery_id": str(discovery.discovery_id)}
+            link_dedupe_key = f"link:{discovery.discovery_id}"
             db.add(
                 ProcessingJob(
                     kind="link_canonical",
-                    dedupe_key=f"link:{discovery.discovery_id}",
-                    payload={"discovery_id": str(discovery.discovery_id)},
+                    dedupe_key=link_dedupe_key,
+                    payload=link_payload,
                     correlation_id=str(crawl_run.crawl_run_id),
                 )
             )
+            pending_jobs.append(_PendingJob("link_canonical", link_dedupe_key, link_payload))
+
             if head is not None:
                 changed += 1
             else:
@@ -186,5 +247,12 @@ async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> Im
         crawl_run.changed_count = changed
         crawl_run.rejected_count = rejected
         await db.commit()
+
+    # Only reachable once the commit above has actually succeeded, whether the
+    # run ended completed or failed partway through - either way, whatever was
+    # added to the session up to that point is now durably persisted, so any
+    # jobs collected for it are safe to publish.
+    if pending_jobs:
+        await _dispatch_pending_jobs(pending_jobs)
 
     return ImportOutcome(crawl_run.crawl_run_id, imported, repeated, changed, rejected)
