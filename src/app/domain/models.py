@@ -203,6 +203,10 @@ class Discovery(TimestampMixin, Base):
     canonical_scholarship_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # Deterministic, provisional facts a heuristic extractor found in
+    # raw_title/raw_excerpt - never a verified fact, purely a reviewer head
+    # start. Null until the extract_candidate job has run for this row.
+    extracted_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # The prior discovery whose content this row revises. A changed re-crawl of
     # an already known URL creates a new row rather than overwriting the old
     # one, so a decision made from the earlier content stays explainable.

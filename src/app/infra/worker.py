@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.domain.extraction import extract_candidate_facts
 from app.domain.models import Discovery
 from app.domain.normalization import normalize_discovery
 from app.infra.core_catalogue import CoreCatalogueClient
@@ -35,6 +36,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await reconcile_stuck_jobs(db)
         elif job.kind == "sync_countries":
             await _sync_countries(db)
+        elif job.kind == "extract_candidate":
+            await _extract_candidate(db, job.payload)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.
@@ -66,3 +69,15 @@ async def _sync_countries(db: AsyncSession) -> None:
     if not settings.core_base_url:
         raise ValueError("CORE_BASE_URL is not configured")
     await sync_countries(db, CoreCatalogueClient(settings.core_base_url))
+
+
+async def _extract_candidate(db: AsyncSession, payload: dict) -> None:
+    discovery = await db.scalar(
+        select(Discovery)
+        .where(Discovery.discovery_id == uuid.UUID(payload["discovery_id"]))
+        .with_for_update()
+    )
+    if discovery is None:
+        raise LookupError("Discovery not found")
+    discovery.extracted_facts = extract_candidate_facts(discovery.raw_title, discovery.raw_excerpt)
+    await db.commit()
