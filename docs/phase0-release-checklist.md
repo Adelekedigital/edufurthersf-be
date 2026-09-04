@@ -81,12 +81,18 @@ until it is built.
 
 A second, deeper instance of the same class of bug surfaced loading the first
 real dataset: 247 rows imported cleanly, but `GET /internal/admin/reviews`
-came back empty. `import_feed_records` writes its jobs straight into
-`processing_jobs` - it never publishes them to QStash, so the `/internal/jobs`
+came back empty. `import_feed_records` wrote its jobs straight into
+`processing_jobs` and never published them to QStash, so the `/internal/jobs`
 fix above never had anything to trigger for them. `POST
-/internal/admin/jobs/run-due` is the stopgap: it executes every due job
-directly and is safe to call repeatedly. Publishing each job to QStash on
-creation, closing this permanently, remains a follow-up.
+/internal/admin/jobs/run-due` closed it for that dataset as a manual stopgap.
+
+**Now closed permanently, not just worked around:** every job import creates is
+published to QStash once its transaction has committed, using
+`QStashPublisher` (previously built, never wired in). QStash delivers it back
+to `/internal/jobs`, which the earlier fix already executes inline. Publishing
+is best-effort - unreachable QStash or missing config logs a warning rather
+than failing the import - so `run-due` remains the recovery path for whatever
+does not get dispatched, not a permanently-needed extra step for every import.
 
 ## Deferred after Phase 0
 
