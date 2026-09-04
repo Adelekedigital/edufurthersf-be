@@ -83,7 +83,7 @@ from app.infra.sessions import (
     get_or_create_session,
     record_search_response,
 )
-from app.infra.sources import create_source, list_sources
+from app.infra.sources import create_source, deactivate_source, list_sources
 from app.infra.withdrawals import withdraw_scholarship
 from app.infra.worker import execute_job
 
@@ -161,6 +161,22 @@ async def create_source_route(
 async def list_sources_route(db: AsyncSession = Depends(get_db)) -> SourceListResponse:
     sources = await list_sources(db)
     return SourceListResponse(data=[_source_read(source) for source in sources])
+
+
+@router.post(
+    "/internal/admin/sources/{source_id}/deactivate",
+    response_model=SourceRead,
+    dependencies=[Depends(require_internal_service)],
+)
+async def deactivate_source_route(
+    source_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> SourceRead:
+    """Stop a source - test data, a retired feed - from being crawled again."""
+    try:
+        source = await deactivate_source(db, source_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _source_read(source)
 
 
 def _provider_read(provider: Provider) -> ProviderRead:
