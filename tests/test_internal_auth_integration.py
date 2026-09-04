@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 
 from app.api.ingestion_schemas import FeedRecord
-from app.domain.models import Discovery, ReviewTask, Source
+from app.domain.models import Discovery, ProcessingJob, ReviewTask, Source
 from app.infra.ingestion import import_feed_records
 from tests.conftest import requires_db
 
@@ -65,6 +65,27 @@ async def test_signed_job_is_accepted_and_replay_is_deduplicated(client) -> None
     assert second.json()["created"] is False, "a replayed delivery must not create a second job"
     assert second.json()["job_id"] == first.json()["job_id"]
     assert second.json()["state"] == "completed", "a replay must not re-run a completed job"
+
+
+async def test_a_job_stuck_at_queued_from_before_this_fix_still_runs_on_redelivery(
+    db, client
+) -> None:
+    """Eligibility must be judged from the job's own stored state, not from
+    whether this delivery happened to be the one that created the row - a job
+    enqueued and never executed (exactly what every delivery did before this
+    fix existed) must still run the next time it is delivered."""
+    stuck = ProcessingJob(kind="dispatch_outbox", dedupe_key="job-stuck", payload={})
+    db.add(stuck)
+    await db.commit()
+    assert stuck.state == "queued"
+
+    body = b'{"kind":"dispatch_outbox","dedupe_key":"job-stuck","payload":{}}'
+    response = await client.post(
+        "/api/v1/internal/jobs", content=body, headers={"Upstash-Signature": _sign(body)}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] is False, "the row already existed"
+    assert response.json()["state"] == "completed", "a job still queued must run, not be skipped"
 
 
 async def test_job_signed_with_the_next_key_is_accepted(client) -> None:

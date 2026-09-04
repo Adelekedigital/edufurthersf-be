@@ -39,6 +39,7 @@ from app.core.config import get_settings
 from app.core.cursors import decode_cursor, encode_cursor
 from app.core.ids import new_uuid7
 from app.core.rate_limit import InMemoryRateLimiter
+from app.domain.jobs import JobState
 from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
 from app.domain.models import (
     Discovery,
@@ -213,15 +214,27 @@ async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobR
     Acknowledge success only after durable completion: enqueuing and returning
     200 without running anything left every QStash-delivered job sitting at
     `queued` forever, since nothing else in the deployed app ever called
-    execute_job. A replayed delivery for a job that already exists reports its
-    stored state without re-running it - claim_job's own state machine already
-    refuses to re-execute anything not queued or due for retry, so this only
-    avoids surfacing that refusal as a 502 on every retry QStash sends.
+    execute_job.
+
+    Eligibility is judged from the job's stored state, not from whether this
+    particular delivery created the row: a job enqueued before this fix
+    existed, or by a request that crashed after enqueueing but before
+    executing, is still sitting at `queued` and must still run on the next
+    delivery - keying this off `created` instead would silently reproduce the
+    exact bug this fixes for anything already stuck. A job already completed,
+    still running, or not yet due for retry is reported as-is without a second
+    attempt; claim_job's own state machine is the source of truth for that,
+    checked here first so execute_job is only called when it would actually
+    proceed.
     """
     if kind not in ALLOWED_JOB_KINDS:
         raise HTTPException(status_code=404, detail="Unknown job kind")
     job, created = await enqueue_job(db, kind, job_request.dedupe_key, job_request.payload)
-    if not created:
+    now = datetime.now(UTC)
+    eligible = job.state in (JobState.queued.value, JobState.retry_wait.value) and (
+        job.next_attempt_at is None or job.next_attempt_at <= now
+    )
+    if not eligible:
         return JobResponse(job_id=job.job_id, state=job.state, created=created)
     try:
         state = await execute_job(db, job.job_id)
