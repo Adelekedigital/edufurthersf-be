@@ -1,0 +1,61 @@
+"""build_cycle_facts: validating a cycle's facts, including the deadline's
+precision and timezone metadata the data standard's §7 requires."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+import pytest
+
+from app.domain.countries import CountryVocabulary
+from app.domain.publication import build_cycle_facts
+
+COUNTRIES = CountryVocabulary(
+    names={"NG": "Nigeria", "US": "United States"}, destinations=frozenset({"US"})
+)
+
+
+def _facts(**overrides):
+    base = dict(
+        destinations=["US"],
+        levels=["masters"],
+        origin_mode="unrestricted",
+        origins=[],
+        field_mode="unknown",
+        fields=[],
+        evidence_fresh=True,
+        deadline_at=None,
+        countries=COUNTRIES,
+    )
+    base.update(overrides)
+    return build_cycle_facts(**base)
+
+
+def test_deadline_precision_defaults_to_date() -> None:
+    facts = _facts(deadline_at=datetime(2026, 6, 30))
+    assert facts["deadline_precision"] == "date"
+    assert "deadline_timezone" not in facts
+
+
+def test_a_known_timezone_is_stored_alongside_the_deadline() -> None:
+    facts = _facts(deadline_at=datetime(2026, 6, 30), deadline_timezone="America/New_York")
+    assert facts["deadline_timezone"] == "America/New_York"
+
+
+def test_an_unrecognised_timezone_is_refused_at_publish_time() -> None:
+    """Refused here, not silently accepted and only discovered as a no-op
+    fail-closed cutoff later when the record is actually read."""
+    with pytest.raises(ValueError, match="Unknown deadline_timezone"):
+        _facts(deadline_at=datetime(2026, 6, 30), deadline_timezone="Not/AZone")
+
+
+def test_no_deadline_means_no_precision_or_timezone_keys_at_all() -> None:
+    facts = _facts(deadline_at=None)
+    assert "deadline_at" not in facts
+    assert "deadline_precision" not in facts
+    assert "deadline_timezone" not in facts
+
+
+def test_datetime_precision_can_be_requested_explicitly() -> None:
+    facts = _facts(deadline_at=datetime(2026, 6, 30, 12, 0), deadline_precision="datetime")
+    assert facts["deadline_precision"] == "datetime"

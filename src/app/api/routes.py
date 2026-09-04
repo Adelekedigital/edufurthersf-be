@@ -340,6 +340,8 @@ def _search_result(
     status = evaluate_public_status(
         row.public_status,
         deadline_at=datetime.fromisoformat(deadline_at) if deadline_at else None,
+        deadline_precision=facts.get("deadline_precision", "datetime"),
+        deadline_timezone=facts.get("deadline_timezone"),
         status_valid_until=row.status_valid_until,
         now=evaluated_at,
     )
@@ -472,6 +474,8 @@ async def publish(
             fields=payload.fields,
             evidence_fresh=payload.evidence_fresh,
             deadline_at=payload.deadline_at,
+            deadline_precision=payload.deadline_precision,
+            deadline_timezone=payload.deadline_timezone,
             countries=countries,
         )
     except ValueError as exc:
@@ -545,6 +549,8 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     status = evaluate_public_status(
         row.public_status,
         deadline_at=datetime.fromisoformat(deadline_at) if deadline_at else None,
+        deadline_precision=facts.get("deadline_precision", "datetime"),
+        deadline_timezone=facts.get("deadline_timezone"),
         status_valid_until=row.status_valid_until,
     )
     return ScholarshipDetailResponse(

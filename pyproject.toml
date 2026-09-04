@@ -12,6 +12,11 @@ dependencies = [
   "PyJWT>=2.10,<3",
   "httpx>=0.28,<1",
   "email-validator>=2.2,<3",
+  # zoneinfo has no bundled IANA database on Windows, and python:3.14-slim
+  # (the deployment image) does not ship one as an OS package either -
+  # without this, every known provider timezone silently resolves as if it
+  # were unknown, with no error at all.
+  "tzdata>=2024.1",
 ]
 
 [build-system]
