@@ -83,6 +83,15 @@ class PublishCycleRequest(BaseModel):
     #: The application deadline, if the provider has stated one. A discovery
     #: signal a reviewer verified, never invented.
     deadline_at: datetime | None = None
+    #: Whether `deadline_at` is a calendar date or a precise instant. Most
+    #: real provider deadlines are dates, not times, hence the default - a
+    #: date-only deadline gets no invented time of day or countdown.
+    deadline_precision: Literal["date", "datetime"] = "date"
+    #: The provider's own IANA timezone, if known (e.g. "America/New_York").
+    #: Left unset when precision is "date" and the timezone is not known: the
+    #: cutoff then fails closed to the earliest place on Earth the date ends,
+    #: rather than assuming a viewer's or a server's timezone.
+    deadline_timezone: str | None = None
 
 
 class PublishCycleResponse(BaseModel):

@@ -112,6 +112,29 @@ request (`evidence_fresh`) rather than independently recorded per claim today.
 Formal per-claim `verifications`/`verification_evidence` linkage, which the data
 standard's 100%-evidence-compliance gate ultimately needs, is deferred.
 
+### Deadlines never get an invented time of day
+
+The data standard requires storing date, time, timezone and precision
+separately, and never manufacturing midnight or a countdown from an unknown
+timezone. `PublishCycleRequest.deadline_precision` (`"date"` by default, or
+`"datetime"`) and `deadline_timezone` (an IANA zone, if the provider's is known)
+travel with `deadline_at` into the cycle's `facts`.
+
+For a `"date"` deadline, `evaluate_public_status` derives the actual cutoff
+instant rather than comparing a bare midnight: with a known timezone, that
+zone's own end of day; with an unknown one, the earliest place on Earth
+(UTC+14) that calendar date ends - the conservative choice, since the failure
+this prevents is claiming "Open now" past a deadline that has, somewhere,
+already passed, not an early downgrade. A cycle published before this existed
+has neither key in its stored facts and is read back as `"datetime"` (a literal
+comparison, its original behaviour), so nothing already published silently
+changes meaning.
+
+`zoneinfo` has no bundled IANA database on Windows or in the `python:3.14-slim`
+deployment image - the `tzdata` PyPI package is a required dependency for
+exactly this reason. Without it, every known timezone silently resolves as if
+it were unknown, with no error at all.
+
 ### Every job import creates is published to QStash
 
 `import_feed_records` writes each `normalize_discovery`/`link_canonical`

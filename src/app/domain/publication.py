@@ -9,7 +9,8 @@ or everything at read time.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain.countries import CountryVocabulary
 from app.domain.taxonomy import TAXONOMY
@@ -25,9 +26,19 @@ def build_cycle_facts(
     fields: list[str],
     evidence_fresh: bool,
     deadline_at: datetime | None,
+    deadline_precision: Literal["date", "datetime"] = "date",
+    deadline_timezone: str | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
-    """Return the validated, normalised `facts` JSONB for a ScholarshipCycle."""
+    """Return the validated, normalised `facts` JSONB for a ScholarshipCycle.
+
+    A date-only deadline is never given an invented time of day: the data
+    standard's rule is "store date, time, timezone and precision separately,"
+    so `deadline_precision`/`deadline_timezone` are stored alongside
+    `deadline_at` rather than folded into a single guessed instant.
+    Defaulting `deadline_precision` to "date" matches how most real provider
+    deadlines are actually stated - a calendar date, not a time of day.
+    """
     normalized_destinations = sorted({countries.destination(value) for value in destinations})
     if not normalized_destinations:
         raise ValueError("At least one destination is required")
@@ -44,6 +55,12 @@ def build_cycle_facts(
     if field_mode == "restricted" and not normalized_fields:
         raise ValueError("field_mode 'restricted' requires at least one field")
 
+    if deadline_timezone is not None:
+        try:
+            ZoneInfo(deadline_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Unknown deadline_timezone {deadline_timezone!r}") from exc
+
     facts: dict[str, Any] = {
         "destinations": normalized_destinations,
         "levels": normalized_levels,
@@ -55,4 +72,7 @@ def build_cycle_facts(
     }
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()
+        facts["deadline_precision"] = deadline_precision
+        if deadline_timezone is not None:
+            facts["deadline_timezone"] = deadline_timezone
     return facts
