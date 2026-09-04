@@ -140,6 +140,21 @@ Put the job `kind` in the signed JSON body and set
 URL. The older `/internal/jobs/{kind}` route remains for compatibility and expects
 that same URL with the kind appended.
 
+The job runs synchronously inside this request, before responding: a freshly
+enqueued delivery is executed immediately, and the response's `state` reflects
+the real outcome (`completed`, `retry_wait`, `failed_review`) rather than
+`queued`. A replayed delivery for a `dedupe_key` that already has a job reports
+that job's current state without re-running it. Acknowledge success only after
+durable completion — enqueuing and returning 200 before anything ran would mean
+every delivered job sat at `queued` forever, since nothing else calls
+`execute_job`.
+
+There is deliberately no periodic sweep yet that revisits a job sitting in
+`retry_wait` past its `next_attempt_at` — that requires the recurring QStash
+schedule manifest, which remains deferred (see the release checklist). A
+transient failure on first delivery is recorded durably and visible, but is
+not automatically retried until that scheduler exists.
+
 `QSTASH_EXPECTED_DESTINATION` is required for any deployment behind a platform
 proxy. QStash signs the public `https://` URL it was given, while the app is
 reached over plain HTTP from a private address, so the request URL the app

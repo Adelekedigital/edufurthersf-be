@@ -35,8 +35,15 @@ that request rather than independently recorded per claim; formal
 not an oversight.
 
 Staging's schema is confirmed current: the "Database migrations" workflow has been
-re-run and the country sync (`sync_countries`) has been triggered and delivered
-successfully via a manual QStash publish.
+re-run.
+
+A QStash delivery of `sync_countries` was accepted (200) but, until the fix below,
+that only meant the job was enqueued — the deployed app never called `execute_job`
+for it. `GET /api/v1/taxonomies` on staging still showed the 6-country seed after
+that "successful" delivery, confirming the sync never actually ran. Delivery being
+accepted is not evidence a job did anything; `/internal/jobs` now runs a freshly
+enqueued job before acknowledging it, exactly as this table's own "QStash delivery"
+row should have meant from the start.
 
 Staging went behind `main` once already without anyone noticing until a job crashed
 on a missing column. That must not happen quietly again: `GET /ready` now reports
@@ -62,7 +69,12 @@ after — belongs with the deploy step, not with memory.
 
 Deferred items are explicit product-owner decisions, not open questions: they are scheduled for activation alongside the capability that needs them, not blockers to the current release.
 
-`CORE_BASE_URL` is now set in Railway, which unblocks the `sync_countries` job's code path. No QStash schedule exists yet to actually invoke it — that manifest is itself deferred (see below) — so the country mirror stays on its built-in seed until a job is triggered, either manually via one QStash publish call or once a recurring schedule is built.
+`CORE_BASE_URL` is now set in Railway, and `/internal/jobs` now actually executes a
+delivered job rather than only enqueueing it (see above), so a manual QStash publish
+of `sync_countries` should populate the mirror for real. That still needs to be
+re-verified against staging - check `GET /api/v1/taxonomies` for more than 6
+countries after the next delivery. No recurring schedule exists yet to invoke it
+automatically; that manifest remains deferred (see below).
 
 ## Deferred after Phase 0
 

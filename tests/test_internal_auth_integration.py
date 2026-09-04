@@ -8,7 +8,11 @@ import time
 
 import jwt
 import pytest
+from sqlalchemy import select
 
+from app.api.ingestion_schemas import FeedRecord
+from app.domain.models import Discovery, ReviewTask, Source
+from app.infra.ingestion import import_feed_records
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -46,20 +50,25 @@ def _sign(body: bytes, *, key: str = CURRENT_KEY, sub: str = DESTINATION) -> str
 
 
 async def test_signed_job_is_accepted_and_replay_is_deduplicated(client) -> None:
-    body = b'{"kind":"normalize_discovery","dedupe_key":"job-1","payload":{}}'
+    # dispatch_outbox needs no payload and always succeeds, since this test is
+    # about signature/dedup mechanics, not about one job kind's own business
+    # logic - execute_job now runs inline, so the job must actually complete.
+    body = b'{"kind":"dispatch_outbox","dedupe_key":"job-1","payload":{}}'
     headers = {"Upstash-Signature": _sign(body), "Content-Type": "application/json"}
     first = await client.post("/api/v1/internal/jobs", content=body, headers=headers)
     assert first.status_code == 200, first.text
     assert first.json()["created"] is True
+    assert first.json()["state"] == "completed"
 
     second = await client.post("/api/v1/internal/jobs", content=body, headers=headers)
     assert second.status_code == 200
     assert second.json()["created"] is False, "a replayed delivery must not create a second job"
     assert second.json()["job_id"] == first.json()["job_id"]
+    assert second.json()["state"] == "completed", "a replay must not re-run a completed job"
 
 
 async def test_job_signed_with_the_next_key_is_accepted(client) -> None:
-    body = b'{"kind":"normalize_discovery","dedupe_key":"job-rotate","payload":{}}'
+    body = b'{"kind":"dispatch_outbox","dedupe_key":"job-rotate","payload":{}}'
     headers = {"Upstash-Signature": _sign(body, key=NEXT_KEY)}
     assert (
         await client.post("/api/v1/internal/jobs", content=body, headers=headers)
@@ -108,3 +117,45 @@ async def test_internal_endpoint_requires_the_service_token(client) -> None:
     right = {"X-Service-Token": "internal-service-token"}
     accepted = await client.post("/api/v1/internal/import/feed", json=payload, headers=right)
     assert accepted.status_code == 422, accepted.text
+
+
+async def test_a_real_qstash_delivery_actually_runs_the_job(db, client) -> None:
+    """A signed link_canonical delivery for a real discovery must reach the
+    review queue through the exact HTTP path QStash uses - not just through
+    calling execute_job directly, the way other tests deliberately do."""
+    source = Source(
+        name="ScholarshipRegion",
+        source_type="aggregator",
+        authority_grade="C",
+        approved_domains=["example.test"],
+        active=True,
+    )
+    db.add(source)
+    await db.commit()
+    await import_feed_records(
+        db,
+        [
+            FeedRecord(
+                source_id=source.source_id,
+                url="https://example.test/award",
+                title="Award A",
+                excerpt="An award",
+            )
+        ],
+    )
+    discovery = await db.scalar(select(Discovery))
+    assert discovery.processing_state == "normalized"
+
+    body = (
+        '{"kind":"link_canonical","dedupe_key":"link-e2e-1",'
+        f'"payload":{{"discovery_id":"{discovery.discovery_id}"}}}}'
+    ).encode()
+    headers = {"Upstash-Signature": _sign(body)}
+    response = await client.post("/api/v1/internal/jobs", content=body, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "completed"
+
+    task = await db.scalar(
+        select(ReviewTask).where(ReviewTask.discovery_id == discovery.discovery_id)
+    )
+    assert task is not None, "the QStash delivery must have actually run link_discovery"
