@@ -23,6 +23,7 @@ from app.api.review_schemas import (
     ReviewDecisionResponse,
     ReviewQueueResponse,
     ReviewTaskSummary,
+    RunDueJobsResponse,
     WithdrawRequest,
     WithdrawResponse,
 )
@@ -61,7 +62,7 @@ from app.infra.core_client import CoreJoinClient
 from app.infra.countries import load_vocabulary
 from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
-from app.infra.jobs import enqueue_job
+from app.infra.jobs import count_due_jobs, due_jobs, enqueue_job
 from app.infra.outbox import enqueue_analytics_event
 from app.infra.publication import publish_cycle
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
@@ -459,6 +460,38 @@ async def publish(
         lifecycle_state=RecordState.published.value,
         public_status=cycle.public_status.value,
     )
+
+
+@router.post(
+    "/internal/admin/jobs/run-due",
+    response_model=RunDueJobsResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def run_due_jobs_route(
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+) -> RunDueJobsResponse:
+    """Manually execute every job currently due, one call at a time.
+
+    A job created as a side effect of another request - feed import's
+    normalize_discovery/link_canonical jobs, most concretely - is never
+    delivered to QStash, so nothing else in this service executes it; only a
+    real QStash delivery to /internal/jobs runs a job. This is the stopgap for
+    that gap until jobs are published to QStash on creation, and it doubles as
+    manual recovery once the recurring schedule that would otherwise call this
+    automatically exists. Safe to call repeatedly: a job already completed, or
+    not yet due for retry, is simply not selected again.
+    """
+    jobs = await due_jobs(db, limit=limit)
+    completed = failed = 0
+    for job in jobs:
+        try:
+            await execute_job(db, job.job_id)
+            completed += 1
+        except Exception:
+            failed += 1
+    remaining = await count_due_jobs(db)
+    return RunDueJobsResponse(completed=completed, failed=failed, remaining=remaining)
 
 
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:

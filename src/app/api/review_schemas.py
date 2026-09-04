@@ -86,3 +86,11 @@ class PublishCycleResponse(BaseModel):
     cycle_id: uuid.UUID
     lifecycle_state: str
     public_status: str
+
+
+class RunDueJobsResponse(BaseModel):
+    completed: int
+    failed: int
+    #: Still due after this call - a real count past the request's limit,
+    #: not a hint that anything was skipped incorrectly.
+    remaining: int

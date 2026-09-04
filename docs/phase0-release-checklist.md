@@ -79,6 +79,15 @@ schedule exists yet to invoke `sync_countries` automatically; that manifest
 remains deferred (see below), so a stale mirror still needs a manual republish
 until it is built.
 
+A second, deeper instance of the same class of bug surfaced loading the first
+real dataset: 247 rows imported cleanly, but `GET /internal/admin/reviews`
+came back empty. `import_feed_records` writes its jobs straight into
+`processing_jobs` - it never publishes them to QStash, so the `/internal/jobs`
+fix above never had anything to trigger for them. `POST
+/internal/admin/jobs/run-due` is the stopgap: it executes every due job
+directly and is safe to call repeatedly. Publishing each job to QStash on
+creation, closing this permanently, remains a follow-up.
+
 ## Deferred after Phase 0
 
 These items are intentionally deferred and should be scheduled when their related
