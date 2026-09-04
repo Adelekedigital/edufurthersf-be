@@ -18,6 +18,7 @@ class TaxonomiesResponse(BaseModel):
     destinations: list[TaxonomyItem]
     degrees: list[TaxonomyItem]
     fields: list[TaxonomyItem]
+    award_types: list[TaxonomyItem]
 
 
 class SearchRequest(BaseModel):
@@ -36,6 +37,7 @@ class SearchResult(BaseModel):
     cycle_id: uuid.UUID
     name: str
     provider: str
+    award_type: str
     status: str
     fit: Literal["confirmed", "possible"]
     official_url: str

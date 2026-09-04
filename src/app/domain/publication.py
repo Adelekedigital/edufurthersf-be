@@ -28,6 +28,7 @@ def build_cycle_facts(
     deadline_at: datetime | None,
     deadline_precision: Literal["date", "datetime"] = "date",
     deadline_timezone: str | None = None,
+    eligibility_note: str | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
     """Return the validated, normalised `facts` JSONB for a ScholarshipCycle.
@@ -38,6 +39,13 @@ def build_cycle_facts(
     `deadline_at` rather than folded into a single guessed instant.
     Defaulting `deadline_precision` to "date" matches how most real provider
     deadlines are actually stated - a calendar date, not a time of day.
+
+    `eligibility_note` exists for a real restriction `origin_mode` cannot
+    represent - an exclude-one rule ("not UK nationals"), an immigration or
+    residency status rather than citizenship, an external classification not
+    yet enumerated. It is never a substitute for `origin_mode`/`origins` when
+    those can honestly capture the restriction; it is what is left when they
+    cannot, so the restriction is still visible rather than silently dropped.
     """
     normalized_destinations = sorted({countries.destination(value) for value in destinations})
     if not normalized_destinations:
@@ -70,6 +78,8 @@ def build_cycle_facts(
         "fields": normalized_fields,
         "evidence_fresh": evidence_fresh,
     }
+    if eligibility_note:
+        facts["eligibility_note"] = eligibility_note
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()
         facts["deadline_precision"] = deadline_precision

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.review_schemas import ReviewDecisionRequest
 from app.domain.models import Discovery, ReviewTask, Scholarship
+from app.domain.taxonomy import TAXONOMY
 
 
 async def decide_review(
@@ -22,8 +23,12 @@ async def decide_review(
             or request.provider_id is None
             or request.official_home_url is None
             or request.slug is None
+            or request.award_type is None
         ):
-            raise ValueError("Approval requires discovery, provider, slug, and official URL")
+            raise ValueError(
+                "Approval requires discovery, provider, slug, award type, and official URL"
+            )
+        award_type = TAXONOMY.award_type(request.award_type)
         discovery = await db.scalar(
             select(Discovery).where(Discovery.discovery_id == task.discovery_id).with_for_update()
         )
@@ -34,6 +39,7 @@ async def decide_review(
             slug=request.slug,
             name=request.canonical_name or discovery.raw_title or "Unnamed scholarship",
             official_home_url=str(request.official_home_url),
+            award_type=award_type,
             lifecycle_state="needs_review",
         )
         db.add(scholarship)

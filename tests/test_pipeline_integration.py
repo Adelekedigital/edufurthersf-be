@@ -127,6 +127,7 @@ async def test_ambiguous_link_opens_a_review_task_instead_of_guessing(db) -> Non
                 slug=slug,
                 name="Award A",
                 official_home_url="https://example.test/award",
+                award_type="scholarship",
             )
         )
     await db.commit()
@@ -178,6 +179,7 @@ async def test_review_approval_creates_an_unpublished_scholarship(db) -> None:
             slug="award-a",
             official_home_url="https://example.test/award",
             canonical_name="Award A",
+            award_type="scholarship",
         ),
     )
     scholarship = await db.scalar(
@@ -186,6 +188,60 @@ async def test_review_approval_creates_an_unpublished_scholarship(db) -> None:
     assert scholarship.lifecycle_state.value == "needs_review"
     await db.refresh(task)
     assert task.state == "resolved"
+
+
+async def test_approval_requires_a_recognised_award_type(db) -> None:
+    source = await _source(db)
+    provider = Provider(name="Provider", approved_domains=["example.test"])
+    db.add(provider)
+    await db.flush()
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
+    discovery = await db.scalar(select(Discovery))
+    task = ReviewTask(discovery_id=discovery.discovery_id, reason="new_candidate")
+    db.add(task)
+    await db.commit()
+    with pytest.raises(ValueError):
+        await decide_review(
+            db,
+            task.review_task_id,
+            ReviewDecisionRequest(
+                decision="approve",
+                reason="Official evidence checked",
+                provider_id=provider.provider_id,
+                slug="award-a",
+                official_home_url="https://example.test/award",
+                award_type="not_a_real_type",
+            ),
+        )
+
+
+async def test_approval_stores_the_verified_award_type(db) -> None:
+    source = await _source(db)
+    provider = Provider(name="Provider", approved_domains=["example.test"])
+    db.add(provider)
+    await db.flush()
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
+    discovery = await db.scalar(select(Discovery))
+    task = ReviewTask(discovery_id=discovery.discovery_id, reason="new_candidate")
+    db.add(task)
+    await db.commit()
+
+    scholarship_id = await decide_review(
+        db,
+        task.review_task_id,
+        ReviewDecisionRequest(
+            decision="approve",
+            reason="Official evidence checked",
+            provider_id=provider.provider_id,
+            slug="award-a",
+            official_home_url="https://example.test/award",
+            award_type="assistantship",
+        ),
+    )
+    scholarship = await db.scalar(
+        select(Scholarship).where(Scholarship.scholarship_id == scholarship_id)
+    )
+    assert scholarship.award_type == "assistantship"
 
 
 async def test_a_resolved_task_cannot_be_decided_twice(db) -> None:
@@ -241,6 +297,7 @@ async def test_the_full_chain_from_import_to_approval_works_unassisted(db) -> No
             slug="award-a",
             official_home_url="https://example.test/award",
             canonical_name="Award A",
+            award_type="scholarship",
         ),
     )
     assert scholarship_id is not None

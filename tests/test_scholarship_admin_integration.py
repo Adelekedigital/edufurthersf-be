@@ -41,6 +41,7 @@ async def _scholarship(
         slug=slug,
         name=name,
         official_home_url="https://example.test/award",
+        award_type="scholarship",
         lifecycle_state=lifecycle_state,
     )
     db.add(scholarship)
@@ -107,6 +108,7 @@ async def test_provider_id_filter(db, client) -> None:
         slug="award-b-filter",
         name="Award B",
         official_home_url="https://example.test/award-b",
+        award_type="scholarship",
         lifecycle_state=RecordState.needs_review,
     )
     db.add(other)
