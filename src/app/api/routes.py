@@ -18,6 +18,9 @@ from app.api.job_schemas import JobRequest, JobResponse
 from app.api.join_schemas import JoinIntentRequest, JoinIntentResponse
 from app.api.provider_schemas import ProviderCreateRequest, ProviderListResponse, ProviderRead
 from app.api.review_schemas import (
+    BulkReviewDecisionRequest,
+    BulkReviewDecisionResponse,
+    BulkReviewDecisionResult,
     PublishCycleRequest,
     PublishCycleResponse,
     ReviewDecisionRequest,
@@ -421,6 +424,47 @@ async def review_decision(
     return ReviewDecisionResponse(
         review_task_id=review_task_id, decision=payload.decision, scholarship_id=scholarship_id
     )
+
+
+@router.post(
+    "/internal/admin/reviews/bulk-decision",
+    response_model=BulkReviewDecisionResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def bulk_review_decision(
+    payload: BulkReviewDecisionRequest, db: AsyncSession = Depends(get_db)
+) -> BulkReviewDecisionResponse:
+    """Apply up to 10 review decisions in one call.
+
+    Each item commits on its own inside decide_review; one bad item - an
+    already-resolved task, an invalid award type, a duplicate slug - is
+    rolled back and reported for that item alone, never failing the other
+    nine. That is the whole point of a bulk endpoint: a reviewer working
+    through a batch should not lose 9 good decisions because 1 was malformed.
+    """
+    results: list[BulkReviewDecisionResult] = []
+    for item in payload.decisions:
+        try:
+            scholarship_id = await decide_review(db, item.review_task_id, item)
+            results.append(
+                BulkReviewDecisionResult(
+                    review_task_id=item.review_task_id,
+                    success=True,
+                    decision=item.decision,
+                    scholarship_id=scholarship_id,
+                )
+            )
+        except Exception as exc:  # isolate one item's failure from the rest of the batch
+            await db.rollback()
+            results.append(
+                BulkReviewDecisionResult(
+                    review_task_id=item.review_task_id,
+                    success=False,
+                    decision=item.decision,
+                    error=str(exc),
+                )
+            )
+    return BulkReviewDecisionResponse(results=results)
 
 
 def _search_result(

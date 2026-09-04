@@ -23,6 +23,30 @@ class ReviewDecisionResponse(BaseModel):
     scholarship_id: uuid.UUID | None = None
 
 
+class BulkReviewDecisionItem(ReviewDecisionRequest):
+    review_task_id: uuid.UUID
+
+
+class BulkReviewDecisionRequest(BaseModel):
+    #: Capped well below a full review-queue page: a bad item still needs a
+    #: readable per-item result, not a wall of them.
+    decisions: list[BulkReviewDecisionItem] = Field(min_length=1, max_length=10)
+
+
+class BulkReviewDecisionResult(BaseModel):
+    review_task_id: uuid.UUID
+    #: True only if this item's own decision was applied. One bad item never
+    #: blocks the rest of the batch, so this is per-item, not all-or-nothing.
+    success: bool
+    decision: str
+    scholarship_id: uuid.UUID | None = None
+    error: str | None = None
+
+
+class BulkReviewDecisionResponse(BaseModel):
+    results: list[BulkReviewDecisionResult]
+
+
 class ReviewTaskSummary(BaseModel):
     review_task_id: uuid.UUID
     reason: str
