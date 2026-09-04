@@ -107,6 +107,24 @@ request (`evidence_fresh`) rather than independently recorded per claim today.
 Formal per-claim `verifications`/`verification_evidence` linkage, which the data
 standard's 100%-evidence-compliance gate ultimately needs, is deferred.
 
+### Jobs feed import creates are not delivered to QStash
+
+`import_feed_records` writes `normalize_discovery`/`link_canonical`
+`ProcessingJob` rows directly - it never publishes them to QStash. Only a real
+QStash delivery to `/internal/jobs` executes a job, so an import's own jobs sit
+at `queued` forever unless something else runs them. This is the gap that left
+247 real discoveries with an empty review queue on staging: the rows existed,
+their jobs never had.
+
+`POST /internal/admin/jobs/run-due` (optional `?limit=`, default 200, max 1000)
+executes every job currently due - queued, or `retry_wait` past its backoff -
+and reports `{completed, failed, remaining}`. Safe to call repeatedly: a job
+already completed, or not yet due for retry, is not selected again, so calling
+it after an import is the manual equivalent of the recurring schedule that
+would otherwise do this automatically. Publishing each job to QStash on
+creation (closing this permanently, without a manual step) remains a follow-up;
+`QStashPublisher` already exists for it and is not yet wired into ingestion.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for local configuration. The database URL must use the

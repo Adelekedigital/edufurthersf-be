@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,16 +100,36 @@ async def reconcile_stuck_jobs(db: AsyncSession, *, limit: int = 100) -> int:
     return len(stuck)
 
 
+def _due_predicate(now: datetime):
+    return (
+        ProcessingJob.state.in_([JobState.queued.value, JobState.retry_wait.value]),
+        or_(ProcessingJob.next_attempt_at.is_(None), ProcessingJob.next_attempt_at <= now),
+    )
+
+
 async def due_jobs(db: AsyncSession, *, limit: int = 100) -> list[ProcessingJob]:
     """Jobs that are queued, or waiting and now past their backoff."""
-    now = datetime.now(UTC)
     rows = await db.scalars(
         select(ProcessingJob)
-        .where(
-            ProcessingJob.state.in_([JobState.queued.value, JobState.retry_wait.value]),
-            or_(ProcessingJob.next_attempt_at.is_(None), ProcessingJob.next_attempt_at <= now),
-        )
+        .where(*_due_predicate(datetime.now(UTC)))
         .order_by(ProcessingJob.job_id)
         .limit(limit)
     )
     return list(rows)
+
+
+async def count_due_jobs(db: AsyncSession) -> int:
+    """How many jobs are due, uncapped by any page size.
+
+    A caller reporting "remaining" against the same small limit it just
+    processed with would understate real remaining work by an arbitrary
+    amount; this counts the true total instead.
+    """
+    return int(
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingJob)
+            .where(*_due_predicate(datetime.now(UTC)))
+        )
+        or 0
+    )
