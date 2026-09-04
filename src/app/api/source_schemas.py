@@ -3,12 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
-def _normalize_domain(value: str) -> str:
-    domain = value.strip().lower().lstrip(".")
-    if not domain:
-        raise ValueError("Domain must not be blank")
-    return domain
+from app.domain.urls import normalize_domain
 
 
 class SourceCreateRequest(BaseModel):
@@ -25,7 +20,7 @@ class SourceCreateRequest(BaseModel):
     @field_validator("approved_domains")
     @classmethod
     def normalize_domains(cls, value: list[str]) -> list[str]:
-        return [_normalize_domain(domain) for domain in value]
+        return [normalize_domain(domain) for domain in value]
 
 
 class SourceRead(BaseModel):

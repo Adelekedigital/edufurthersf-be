@@ -28,6 +28,10 @@ class ReviewTaskSummary(BaseModel):
     discovery_id: uuid.UUID | None = None
     revision_id: uuid.UUID | None = None
     raw_title: str | None = None
+    #: Without this a reviewer cannot verify anything, or tell two similarly
+    #: titled candidates apart.
+    raw_excerpt: str | None = None
+    source_url: str | None = None
     created_at: datetime
 
 

@@ -11,8 +11,11 @@ from app.domain.models import (
     RecordState,
     ReviewTask,
     Scholarship,
+    Source,
 )
+from app.infra.ingestion import import_feed_records
 from tests.conftest import requires_db
+from tests.test_pipeline_integration import _record
 from tests.test_search_integration import CONFIRMED_FACTS, SEARCH, _publish
 
 pytestmark = requires_db
@@ -33,6 +36,32 @@ async def test_the_queue_orders_by_priority_then_age(db, client) -> None:
     body = (await client.get("/api/v1/internal/admin/reviews", headers=AUTH)).json()
     assert [task["reason"] for task in body["data"]] == ["urgent", "low_priority"]
     assert body["open_count"] == 2, "resolved work is not outstanding"
+
+
+async def test_the_queue_carries_enough_to_actually_review_something(db, client) -> None:
+    """A bare title is not enough to verify a claim or tell two similarly
+    titled candidates apart; the queue must carry the excerpt and the source
+    URL too."""
+    source = Source(
+        name="ScholarshipRegion",
+        source_type="aggregator",
+        authority_grade="C",
+        approved_domains=["example.test"],
+        active=True,
+    )
+    db.add(source)
+    await db.commit()
+    await import_feed_records(
+        db, [_record(source.source_id, "https://example.test/award", "Real Award")]
+    )
+    await client.post("/api/v1/internal/admin/jobs/run-due", headers=AUTH)
+
+    body = (await client.get("/api/v1/internal/admin/reviews", headers=AUTH)).json()
+    assert len(body["data"]) == 1
+    task = body["data"][0]
+    assert task["raw_title"] == "Real Award"
+    assert task["raw_excerpt"] == "An award"
+    assert task["source_url"] == "https://example.test/award"
 
 
 async def test_the_queue_can_show_resolved_tasks(db, client) -> None:
