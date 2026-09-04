@@ -69,12 +69,15 @@ after — belongs with the deploy step, not with memory.
 
 Deferred items are explicit product-owner decisions, not open questions: they are scheduled for activation alongside the capability that needs them, not blockers to the current release.
 
-`CORE_BASE_URL` is now set in Railway, and `/internal/jobs` now actually executes a
-delivered job rather than only enqueueing it (see above), so a manual QStash publish
-of `sync_countries` should populate the mirror for real. That still needs to be
-re-verified against staging - check `GET /api/v1/taxonomies` for more than 6
-countries after the next delivery. No recurring schedule exists yet to invoke it
-automatically; that manifest remains deferred (see below).
+**Confirmed working end to end against staging**, not just in tests: a manual
+QStash publish of `sync_countries` after the `/internal/jobs` fix now populates
+the mirror for real - `GET /api/v1/taxonomies` moved from the 6-country seed to
+Core's actual catalogue. That closes the loop this session opened: a delivery
+that only looked successful, then a fix for it, now verified against the real
+deployed environment rather than only against the test suite. No recurring
+schedule exists yet to invoke `sync_countries` automatically; that manifest
+remains deferred (see below), so a stale mirror still needs a manual republish
+until it is built.
 
 ## Deferred after Phase 0
 
