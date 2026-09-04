@@ -23,14 +23,22 @@ def deadline_cutoff(
     display fail-safe, not a claim about when the provider's deadline actually
     falls.
 
-    `precision="datetime"` means the caller already holds a real instant (an
-    exact date, time and known offset) and this is a no-op passthrough - nothing
-    here needs to derive an end-of-day cutoff for it.
+    `precision="datetime"` means the caller already holds a real instant - an
+    exact date and time. If it already carries a UTC offset, this is a no-op
+    passthrough. A naive value paired with a known `timezone` is localized to
+    that zone rather than assumed UTC, so a stated "5pm BST" is not silently
+    read as "5pm UTC." Only a naive value with no known zone falls back to
+    assuming UTC, to avoid raising when compared against an aware `now`.
     """
     if precision != "date":
-        # A naive datetime here would raise comparing against an aware `now`;
-        # assume UTC rather than crash on a caller that omitted an offset.
-        return deadline_at if deadline_at.tzinfo else deadline_at.replace(tzinfo=dt.UTC)
+        if deadline_at.tzinfo:
+            return deadline_at
+        if timezone:
+            try:
+                return deadline_at.replace(tzinfo=ZoneInfo(timezone)).astimezone(dt.UTC)
+            except ZoneInfoNotFoundError:
+                pass
+        return deadline_at.replace(tzinfo=dt.UTC)
     zone: dt.tzinfo = _FAIL_CLOSED_TZ
     if timezone:
         try:
