@@ -32,6 +32,10 @@ class ReviewTaskSummary(BaseModel):
     #: titled candidates apart.
     raw_excerpt: str | None = None
     source_url: str | None = None
+    #: Deterministic, provisional facts a heuristic extractor found - a
+    #: reviewer head start, never a verified fact. Null until extract_candidate
+    #: has run for this discovery.
+    extracted_facts: dict | None = None
     created_at: datetime
 
 

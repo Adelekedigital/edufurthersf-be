@@ -480,7 +480,11 @@ async def review_queue(
     rows = list(
         await db.execute(
             select(
-                ReviewTask, Discovery.raw_title, Discovery.raw_excerpt, SourcePage.normalized_url
+                ReviewTask,
+                Discovery.raw_title,
+                Discovery.raw_excerpt,
+                Discovery.extracted_facts,
+                SourcePage.normalized_url,
             )
             .outerjoin(Discovery, Discovery.discovery_id == ReviewTask.discovery_id)
             .outerjoin(SourcePage, SourcePage.page_id == Discovery.source_page_id)
@@ -503,10 +507,11 @@ async def review_queue(
                 revision_id=task.revision_id,
                 raw_title=raw_title,
                 raw_excerpt=raw_excerpt,
+                extracted_facts=extracted_facts,
                 source_url=source_url,
                 created_at=task.created_at,
             )
-            for task, raw_title, raw_excerpt, source_url in rows
+            for task, raw_title, raw_excerpt, extracted_facts, source_url in rows
         ],
         open_count=int(open_count or 0),
     )
