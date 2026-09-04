@@ -23,6 +23,19 @@ def test_datetime_precision_assumes_utc_for_a_naive_value() -> None:
     assert cutoff == datetime(2026, 6, 30, 15, 0, tzinfo=UTC)
 
 
+def test_datetime_precision_with_a_naive_value_and_known_timezone_localizes_to_it() -> None:
+    """"5pm BST" must convert as BST (UTC+1), not be silently read as "5pm UTC"."""
+    naive = datetime(2027, 4, 15, 17, 0)
+    cutoff = deadline_cutoff(naive, precision="datetime", timezone="Europe/London")
+    assert cutoff == datetime(2027, 4, 15, 16, 0, tzinfo=UTC)
+
+
+def test_datetime_precision_with_a_naive_value_and_unrecognised_timezone_assumes_utc() -> None:
+    naive = datetime(2027, 4, 15, 17, 0)
+    cutoff = deadline_cutoff(naive, precision="datetime", timezone="Not/AZone")
+    assert cutoff == datetime(2027, 4, 15, 17, 0, tzinfo=UTC)
+
+
 def test_date_precision_with_a_known_timezone_uses_that_zones_end_of_day() -> None:
     # Any time-of-day on the input is irrelevant once precision is "date" -
     # only the calendar date and the given zone matter.
