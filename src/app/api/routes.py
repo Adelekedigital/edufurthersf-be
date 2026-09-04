@@ -36,6 +36,11 @@ from app.api.schemas import (
     TaxonomiesResponse,
     TaxonomyItem,
 )
+from app.api.scholarship_admin_schemas import (
+    ScholarshipAdminListResponse,
+    ScholarshipAdminRead,
+    ScholarshipCycleAdminRead,
+)
 from app.api.source_schemas import SourceCreateRequest, SourceListResponse, SourceRead
 from app.core.config import get_settings
 from app.core.cursors import decode_cursor, encode_cursor
@@ -71,6 +76,7 @@ from app.infra.providers import create_provider, list_providers
 from app.infra.publication import publish_cycle
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
+from app.infra.scholarship_admin import search_scholarships
 from app.infra.sessions import (
     SESSION_COOKIE,
     filter_digest,
@@ -186,6 +192,82 @@ async def create_provider_route(
 async def list_providers_route(db: AsyncSession = Depends(get_db)) -> ProviderListResponse:
     providers = await list_providers(db)
     return ProviderListResponse(data=[_provider_read(provider) for provider in providers])
+
+
+def _scholarship_admin_read(
+    scholarship: Scholarship, evaluated_at: datetime
+) -> ScholarshipAdminRead:
+    return ScholarshipAdminRead(
+        scholarship_id=scholarship.scholarship_id,
+        slug=scholarship.slug,
+        name=scholarship.name,
+        official_home_url=scholarship.official_home_url,
+        lifecycle_state=scholarship.lifecycle_state.value,
+        provider_id=scholarship.provider_id,
+        provider_name=scholarship.provider.name if scholarship.provider else "",
+        cycles=[
+            ScholarshipCycleAdminRead(
+                cycle_id=cycle.cycle_id,
+                provider_cycle_key=cycle.provider_cycle_key,
+                applicant_segment=cycle.applicant_segment,
+                official_cycle_url=cycle.official_cycle_url,
+                public_status=cycle.public_status.value,
+                evaluated_public_status=evaluate_public_status(
+                    cycle.public_status,
+                    deadline_at=datetime.fromisoformat(cycle.facts["deadline_at"])
+                    if cycle.facts.get("deadline_at")
+                    else None,
+                    deadline_precision=cycle.facts.get("deadline_precision", "datetime"),
+                    deadline_timezone=cycle.facts.get("deadline_timezone"),
+                    status_valid_until=cycle.status_valid_until,
+                    now=evaluated_at,
+                ).value,
+                status_valid_until=cycle.status_valid_until,
+                last_verified_at=cycle.last_verified_at,
+                facts=cycle.facts or {},
+            )
+            for cycle in scholarship.cycles
+        ],
+    )
+
+
+@router.get(
+    "/internal/admin/scholarships",
+    response_model=ScholarshipAdminListResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def list_scholarships_route(
+    q: str | None = Query(default=None, min_length=1, max_length=255),
+    lifecycle_state: RecordState | None = None,
+    provider_id: uuid.UUID | None = None,
+    public_status: PublicStatus | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> ScholarshipAdminListResponse:
+    """Search and filter every scholarship regardless of lifecycle state.
+
+    For reviewers and testers confirming what an import or publish actually
+    produced - not the public `/search` route, which only matches published,
+    destination/level/field-eligible cycles for an applicant. `public_status`
+    filters on the value each cycle has stored; each returned cycle also
+    carries `evaluated_public_status`, recomputed the way search and detail
+    do, so a stale stored `open_verified` past its deadline is visible as
+    such rather than hidden behind the value last written.
+    """
+    evaluated_at = datetime.now(UTC)
+    rows, total = await search_scholarships(
+        db,
+        q=q,
+        lifecycle_state=lifecycle_state,
+        provider_id=provider_id,
+        public_status=public_status,
+        limit=limit,
+        offset=offset,
+    )
+    return ScholarshipAdminListResponse(
+        data=[_scholarship_admin_read(row, evaluated_at) for row in rows], total=total
+    )
 
 
 def _qstash_destination(request: Request, kind: str | None = None) -> str:
