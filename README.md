@@ -71,6 +71,11 @@ Before importing, a `Source` must exist: `POST /internal/admin/sources` (`name`,
 `source_type`, an A–D `authority_grade`, `approved_domains`, `active`); `GET
 /internal/admin/sources` lists what is registered.
 
+Before approving anything, a `Provider` must exist too - the organization
+responsible for an award, distinct from the sources that report on it:
+`POST`/`GET /internal/admin/providers` (`name`, `approved_domains`).
+`decide_review`'s approve path takes a `provider_id`.
+
 ### Bulk import from a CSV export
 
 ```powershell

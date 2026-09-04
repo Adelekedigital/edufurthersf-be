@@ -1,6 +1,18 @@
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
+def normalize_domain(value: str) -> str:
+    """Normalize a bare approved-domain entry: lowercase, no leading dot.
+
+    Shared by Source and Provider admin creation, both of which store a list
+    of domains a fetch or an official-URL claim is checked against.
+    """
+    domain = value.strip().lower().lstrip(".")
+    if not domain:
+        raise ValueError("Domain must not be blank")
+    return domain
+
+
 def canonicalize_url(value: str) -> str:
     """Normalize an HTTP(S) URL for identity; tracking parameters are discarded."""
     parts = urlsplit(value.strip())

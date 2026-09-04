@@ -16,6 +16,7 @@ from app.api.detail_schemas import ScholarshipDetailResponse
 from app.api.ingestion_schemas import FeedImportRequest, FeedImportResponse
 from app.api.job_schemas import JobRequest, JobResponse
 from app.api.join_schemas import JoinIntentRequest, JoinIntentResponse
+from app.api.provider_schemas import ProviderCreateRequest, ProviderListResponse, ProviderRead
 from app.api.review_schemas import (
     PublishCycleRequest,
     PublishCycleResponse,
@@ -45,6 +46,7 @@ from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
 from app.domain.models import (
     Discovery,
     JoinRequest,
+    Provider,
     PublicStatus,
     RecordState,
     ReviewTask,
@@ -52,6 +54,7 @@ from app.domain.models import (
     ScholarshipCycle,
     Search,
     Source,
+    SourcePage,
 )
 from app.domain.publication import build_cycle_facts
 from app.domain.return_urls import is_allowed_return_url
@@ -64,6 +67,7 @@ from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import count_due_jobs, due_jobs, enqueue_job
 from app.infra.outbox import enqueue_analytics_event
+from app.infra.providers import create_provider, list_providers
 from app.infra.publication import publish_cycle
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
@@ -151,6 +155,37 @@ async def create_source_route(
 async def list_sources_route(db: AsyncSession = Depends(get_db)) -> SourceListResponse:
     sources = await list_sources(db)
     return SourceListResponse(data=[_source_read(source) for source in sources])
+
+
+def _provider_read(provider: Provider) -> ProviderRead:
+    return ProviderRead(
+        provider_id=provider.provider_id,
+        name=provider.name,
+        approved_domains=provider.approved_domains,
+    )
+
+
+@router.post(
+    "/internal/admin/providers",
+    response_model=ProviderRead,
+    status_code=201,
+    dependencies=[Depends(require_internal_service)],
+)
+async def create_provider_route(
+    payload: ProviderCreateRequest, db: AsyncSession = Depends(get_db)
+) -> ProviderRead:
+    provider = await create_provider(db, payload)
+    return _provider_read(provider)
+
+
+@router.get(
+    "/internal/admin/providers",
+    response_model=ProviderListResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def list_providers_route(db: AsyncSession = Depends(get_db)) -> ProviderListResponse:
+    providers = await list_providers(db)
+    return ProviderListResponse(data=[_provider_read(provider) for provider in providers])
 
 
 def _qstash_destination(request: Request, kind: str | None = None) -> str:
@@ -336,11 +371,19 @@ async def review_queue(
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewQueueResponse:
-    """The reviewer's work list, highest priority and oldest first."""
+    """The reviewer's work list, highest priority and oldest first.
+
+    Carries the discovery's excerpt and source URL, not just its title: a
+    reviewer cannot verify anything - or even tell two similarly-titled
+    candidates apart - from a bare title alone.
+    """
     rows = list(
         await db.execute(
-            select(ReviewTask, Discovery.raw_title)
+            select(
+                ReviewTask, Discovery.raw_title, Discovery.raw_excerpt, SourcePage.normalized_url
+            )
             .outerjoin(Discovery, Discovery.discovery_id == ReviewTask.discovery_id)
+            .outerjoin(SourcePage, SourcePage.page_id == Discovery.source_page_id)
             .where(ReviewTask.state == state)
             .order_by(ReviewTask.priority, ReviewTask.created_at)
             .limit(limit)
@@ -359,9 +402,11 @@ async def review_queue(
                 discovery_id=task.discovery_id,
                 revision_id=task.revision_id,
                 raw_title=raw_title,
+                raw_excerpt=raw_excerpt,
+                source_url=source_url,
                 created_at=task.created_at,
             )
-            for task, raw_title in rows
+            for task, raw_title, raw_excerpt, source_url in rows
         ],
         open_count=int(open_count or 0),
     )
