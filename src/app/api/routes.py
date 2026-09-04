@@ -218,6 +218,7 @@ def _scholarship_admin_read(
         slug=scholarship.slug,
         name=scholarship.name,
         official_home_url=scholarship.official_home_url,
+        award_type=scholarship.award_type,
         lifecycle_state=scholarship.lifecycle_state.value,
         provider_id=scholarship.provider_id,
         provider_name=scholarship.provider.name if scholarship.provider else "",
@@ -446,6 +447,8 @@ def _search_result(
     caveats = list(decision.caveats)
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
+    if facts.get("eligibility_note"):
+        caveats.append(facts["eligibility_note"])
     return SearchResult(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
@@ -453,6 +456,7 @@ def _search_result(
         provider=row.scholarship.provider.name
         if row.scholarship and row.scholarship.provider
         else "",
+        award_type=row.scholarship.award_type if row.scholarship else "",
         status=status.value,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         official_url=row.official_cycle_url,
@@ -579,6 +583,7 @@ async def publish(
             deadline_at=payload.deadline_at,
             deadline_precision=payload.deadline_precision,
             deadline_timezone=payload.deadline_timezone,
+            eligibility_note=payload.eligibility_note,
             countries=countries,
         )
     except ValueError as exc:
@@ -656,19 +661,23 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         deadline_timezone=facts.get("deadline_timezone"),
         status_valid_until=row.status_valid_until,
     )
+    caveats: list[str] = []
+    if status != row.public_status:
+        caveats.append("Current status evidence requires re-verification.")
+    if facts.get("eligibility_note"):
+        caveats.append(facts["eligibility_note"])
     return ScholarshipDetailResponse(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
         name=row.scholarship.name,
         provider=row.scholarship.provider.name,
+        award_type=row.scholarship.award_type,
         status=status.value,
         status_valid_until=row.status_valid_until,
         official_url=row.official_cycle_url,
         facts=facts,
         last_verified_at=row.last_verified_at,
-        caveats=[]
-        if status == row.public_status
-        else ["Current status evidence requires re-verification."],
+        caveats=caveats,
     )
 
 
@@ -693,6 +702,9 @@ async def taxonomies(db: AsyncSession = Depends(get_db)) -> TaxonomiesResponse:
         ],
         degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()],
         fields=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.fields.items()],
+        award_types=[
+            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
+        ],
     )
 
 

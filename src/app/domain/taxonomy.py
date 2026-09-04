@@ -15,6 +15,7 @@ class Taxonomy:
     fields: dict[str, str]
     aliases: dict[str, str]
     degree_aliases: dict[str, str]
+    award_types: dict[str, str]
 
     def country(self, value: str) -> str:
         code = value.strip().upper()
@@ -34,6 +35,12 @@ class Taxonomy:
         code = self.aliases.get(code, code)
         if code not in self.fields:
             raise ValueError("Unsupported field")
+        return code
+
+    def award_type(self, value: str) -> str:
+        code = value.strip().lower()
+        if code not in self.award_types:
+            raise ValueError("Unsupported award type")
         return code
 
 
@@ -61,6 +68,17 @@ TAXONOMY = Taxonomy(
         "msc": "masters",
         "ma": "masters",
         "mba": "masters",
+    },
+    # What kind of award this is, distinct from what it's for (degree/field) or
+    # who funds it (provider). A lab's paid research assistantship and a
+    # merit-based tuition scholarship are both legitimate catalog entries, but
+    # a searcher deserves to know which one they're looking at.
+    award_types={
+        "scholarship": "Scholarship",
+        "fellowship": "Fellowship",
+        "assistantship": "Assistantship",
+        "studentship": "Studentship",
+        "grant": "Grant",
     },
 )
 

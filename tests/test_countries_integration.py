@@ -97,6 +97,9 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
     assert {item["code"] for item in body["countries"]} == {"NG", "CA"}
     assert {item["code"] for item in body["destinations"]} == {"CA"}
     assert {item["code"] for item in body["degrees"]} == {"masters", "doctorate"}
+    assert {item["code"] for item in body["award_types"]} == {
+        "scholarship", "fellowship", "assistantship", "studentship", "grant",
+    }
 
 
 async def test_search_accepts_any_origin_but_only_covered_destinations(db, client) -> None:

@@ -9,6 +9,7 @@ class ScholarshipDetailResponse(BaseModel):
     cycle_id: uuid.UUID
     name: str
     provider: str
+    award_type: str
     status: str
     status_valid_until: datetime | None
     official_url: str

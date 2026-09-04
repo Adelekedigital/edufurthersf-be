@@ -47,6 +47,7 @@ async def _publish(db, *, slug: str, facts: dict, status: PublicStatus, deadline
         slug=slug,
         name=f"Award {slug}",
         official_home_url="https://example.test/award",
+        award_type="scholarship",
         lifecycle_state=RecordState.published,
     )
     db.add(scholarship)

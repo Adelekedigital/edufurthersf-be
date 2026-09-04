@@ -11,6 +11,9 @@ class ReviewDecisionRequest(BaseModel):
     canonical_name: str | None = Field(default=None, min_length=1, max_length=500)
     official_home_url: HttpUrl | None = None
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    #: What kind of award this is - scholarship, fellowship, assistantship,
+    #: studentship, grant. Required on approve, validated against TAXONOMY.
+    award_type: str | None = Field(default=None, min_length=1, max_length=30)
     reason: str = Field(min_length=1, max_length=2000)
 
 
@@ -96,6 +99,11 @@ class PublishCycleRequest(BaseModel):
     #: cutoff then fails closed to the earliest place on Earth the date ends,
     #: rather than assuming a viewer's or a server's timezone.
     deadline_timezone: str | None = None
+    #: A real restriction origin_mode/origins cannot represent - an
+    #: exclude-one rule, an immigration/residency status, an unenumerated
+    #: external classification. Never used to avoid the honest origin_mode
+    #: call; only for what's left once that call has been made.
+    eligibility_note: str | None = Field(default=None, max_length=1000)
 
 
 class PublishCycleResponse(BaseModel):

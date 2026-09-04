@@ -61,6 +61,10 @@ class Scholarship(TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(500))
     official_home_url: Mapped[str] = mapped_column(Text)
+    #: What kind of award this is (scholarship/fellowship/assistantship/...),
+    #: validated against TAXONOMY.award_type - a taxonomy concept like degree
+    #: or field, not a DB-level enum, so a new type needs no migration.
+    award_type: Mapped[str] = mapped_column(String(30))
     # The migration stores this as VARCHAR. A native PG enum would bind as
     # `$1::recordstate`, a type no migration ever created, so every query
     # filtering on it failed. Keep the Python enum, store it as text.

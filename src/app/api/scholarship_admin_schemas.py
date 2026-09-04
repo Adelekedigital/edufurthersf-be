@@ -26,6 +26,7 @@ class ScholarshipAdminRead(BaseModel):
     slug: str
     name: str
     official_home_url: str
+    award_type: str
     lifecycle_state: str
     provider_id: uuid.UUID
     provider_name: str
