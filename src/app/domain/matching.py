@@ -7,7 +7,9 @@ class SearchProfile:
     origin_country: str
     target_countries: frozenset[str]
     program_level: str
-    field: str
+    #: None means "no field preference" - never excludes a field_mode="restricted"
+    #: record, since the searcher isn't filtering on field at all.
+    field: str | None
 
 
 @dataclass(frozen=True)
@@ -37,12 +39,16 @@ def evaluate_match(profile: SearchProfile, facts: dict[str, Any]) -> MatchDecisi
         return None
     field_mode = facts.get("field_mode", "unknown")
     fields = {_normalise(str(v)) for v in facts.get("fields", [])}
-    if field_mode == "restricted" and _normalise(profile.field) not in fields:
+    if (
+        field_mode == "restricted"
+        and profile.field is not None
+        and _normalise(profile.field) not in fields
+    ):
         return None
     possible = origin_mode == "unknown" or field_mode == "unknown"
     score = 0
     reasons: list[str] = []
-    if field_mode == "all" or _normalise(profile.field) in fields:
+    if field_mode == "all" or (profile.field is not None and _normalise(profile.field) in fields):
         score += 25
         reasons.append("field_compatible")
     if origin_mode == "unrestricted" or _normalise(profile.origin_country) in origins:

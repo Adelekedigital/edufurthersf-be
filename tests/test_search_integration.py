@@ -122,3 +122,14 @@ async def test_unsupported_filters_are_rejected(client, bad_field: str) -> None:
     response = await client.post("/api/v1/search", json={**SEARCH, "field": bad_field})
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
+
+
+async def test_no_field_preference_still_finds_a_field_restricted_scholarship(db, client) -> None:
+    """A searcher whose real field (Law, Business, ...) isn't one of the two
+    taxonomy codes must be able to search with no field at all, and still see
+    scholarships that are restricted to a *specific* field - they just aren't
+    excluded by a preference they never expressed."""
+    await _publish(db, slug="cs-only", facts=CONFIRMED_FACTS, status=PublicStatus.open_verified)
+    no_field_search = {k: v for k, v in SEARCH.items() if k != "field"}
+    body = (await client.post("/api/v1/search", json=no_field_search)).json()
+    assert [item["name"] for item in body["data"]] == ["Award cs-only"]

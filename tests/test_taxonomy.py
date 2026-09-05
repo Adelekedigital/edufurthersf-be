@@ -16,6 +16,15 @@ def test_unknown_taxonomy_value_is_rejected() -> None:
         normalize_search_filters("NG", ["XX"], "masters", "public_health")
 
 
+def test_no_field_preference_passes_through_as_none() -> None:
+    """The taxonomy only holds two field codes - forcing a choice between
+    exactly two subjects would misrepresent every other field of study."""
+    _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", None)
+    assert field is None
+    _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", "")
+    assert field is None
+
+
 def test_phd_resolves_to_the_core_aligned_code() -> None:
     """A join intent forwards this value; Core holds `doctorate`, not `phd`."""
     assert TAXONOMY.degree("phd") == "doctorate"
