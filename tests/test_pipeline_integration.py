@@ -301,3 +301,19 @@ async def test_the_full_chain_from_import_to_approval_works_unassisted(db) -> No
         ),
     )
     assert scholarship_id is not None
+
+
+async def test_relinking_a_discovery_does_not_duplicate_its_open_review_task(db) -> None:
+    source = await _source(db)
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
+    discovery = await db.scalar(select(Discovery))
+
+    assert await link_discovery(db, discovery.discovery_id) == LinkOutcome.new_candidate
+    assert await link_discovery(db, discovery.discovery_id) == LinkOutcome.new_candidate
+
+    tasks = list(
+        await db.scalars(
+            select(ReviewTask).where(ReviewTask.discovery_id == discovery.discovery_id)
+        )
+    )
+    assert len(tasks) == 1
