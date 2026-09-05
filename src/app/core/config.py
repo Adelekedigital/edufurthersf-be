@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     core_join_intent_url: str | None = None
     core_service_token: str | None = None
     core_allowed_return_url_prefix: str | None = None
+    # The shared AI Router (LiteLLM + Langfuse) - a platform capability owned
+    # outside both Core and Finder, not yet provisioned as its own service.
+    ai_router_base_url: str | None = None
+    ai_router_service_token: str | None = None
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 

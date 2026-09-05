@@ -280,14 +280,25 @@ body.
 None of this should stay a manual, one-session process. In rough order of
 scope:
 
-1. **Upgrade `extract_candidate`** (already a real job kind, currently a
+1. **The shared AI Router's Finder-owned half is scaffolded**
+   (`domain/ai_router.py`, `infra/ai_router_client.py`) - the domain port and
+   the HTTP adapter against the documented contract
+   (`POST /api/v1/internal/ai/execute`), per the Analytics & Metrics
+   Standard §5. The router itself - the actual LiteLLM proxy and Langfuse
+   instance - is explicitly a shared platform capability, not something this
+   repo builds ("rather than building those platforms in the Finder
+   sprint"): it belongs in its own independent service, with real hosting,
+   licensing and vendor-terms decisions still unmade. Nothing calls this
+   adapter yet; there is nothing at the other end of it to call.
+2. **Upgrade `extract_candidate`** (already a real job kind, currently a
    deterministic regex/keyword extractor - see `domain/extraction.py`) to
-   call a real LLM for extraction instead. This is the smallest step: it
-   only extracts and explains, per the stated automation boundary ("AI may
-   extract structured candidate facts and explain deterministic matches").
-   It needs a provider/API key/cost decision, not a policy decision -
-   record that decision here once made.
-2. **`prepare_review` is now built** (`domain/review_draft.py`,
+   call a real LLM for extraction instead, once (1) is deployed somewhere
+   real. This is the smallest step after that: it only extracts and
+   explains, per the stated automation boundary ("AI may extract structured
+   candidate facts and explain deterministic matches"). Needs a
+   provider/API key/cost decision, not a policy decision - record that
+   decision here once made.
+3. **`prepare_review` is now built** (`domain/review_draft.py`,
    `infra/worker.py::_prepare_review`) - but only the cheap first pass this
    item originally called for: a deterministic destination screen against
    the discovery's own text, matched programmatically against the mirrored
@@ -302,17 +313,17 @@ scope:
    The *expensive* half of this item - fetch the cited source, find and
    fetch the real official page, cross-check every claim, resolve country
    lists programmatically, apply the full bars above, and draft a real
-   `confident_pass` - still needs the AI Router + LLM extraction (item 1)
+   `confident_pass` - still needs the AI Router + LLM extraction (items 1-2)
    first; a regex/keyword heuristic cannot honestly claim to have verified
    anything beyond the destination screen.
-3. **Use the bulk review-decision endpoint** (`POST
+4. **Use the bulk review-decision endpoint** (`POST
    /internal/admin/reviews/bulk-decision`, ≤10 per call, already built) for
    exactly the case that motivated it: many independent decisions with the
    same shape, applied in one pass rather than one HTTP call each. This
    already carried real weight this session (125 destination rejects in 13
    calls) and is the natural output target for `prepare_review`'s
    confident-verdict batch, not just a manual convenience.
-4. **Only after (2) has run against real volume with a real track record**
+5. **Only after (3) has run against real volume with a real track record**
    (proposals reviewed, percentage accepted unchanged vs. corrected vs.
    rejected) - revisit whether a scoped, high-confidence slice should skip
    the human confirmation click too. Not before; a single afternoon's
