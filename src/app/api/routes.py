@@ -792,7 +792,12 @@ async def taxonomies(db: AsyncSession = Depends(get_db)) -> TaxonomiesResponse:
             if code in countries.names
         ],
         degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()],
-        fields=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.fields.items()],
+        fields=[
+            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.broad_fields.items()
+        ],
+        narrow_fields=[
+            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.narrow_fields.items()
+        ],
         award_types=[
             TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
         ],
@@ -891,7 +896,14 @@ async def search(
     started = perf_counter()
     countries = await load_vocabulary(db)
     try:
-        origin, destinations, uncovered_destinations, degree, field = normalize_search_filters(
+        (
+            origin,
+            destinations,
+            uncovered_destinations,
+            degree,
+            field,
+            accepted_fields,
+        ) = normalize_search_filters(
             payload.origin_country,
             payload.target_countries,
             payload.program_level,
@@ -907,7 +919,7 @@ async def search(
         # plainly which ones weren't, rather than silently returning fewer
         # results than requested with no explanation.
         warnings.append(f"no_verified_coverage:{','.join(sorted(uncovered_destinations))}")
-    profile = SearchProfile(origin, destinations, degree, field)
+    profile = SearchProfile(origin, destinations, degree, accepted_fields)
     filters = {
         "origin_country": origin,
         "target_countries": sorted(destinations),

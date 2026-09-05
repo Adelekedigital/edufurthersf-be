@@ -16,7 +16,7 @@ import httpx
 SEARCH_PROBE: dict[str, Any] = {
     "origin_country": "NG",
     "program_level": "masters",
-    "field": "public_health",
+    "field": "health_and_welfare",
     "target_countries": ["CA", "GB"],
     "limit": 5,
 }

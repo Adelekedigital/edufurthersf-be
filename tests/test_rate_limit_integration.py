@@ -16,7 +16,7 @@ pytestmark = requires_db
 SEARCH = {
     "origin_country": "NG",
     "program_level": "masters",
-    "field": "public_health",
+    "field": "health_and_welfare",
     "target_countries": ["CA"],
 }
 

@@ -316,7 +316,19 @@ call in front of four constants. The codes stay local and
 than at a handoff.
 
 Core has no field-of-study catalogue — programme names there are free text by
-design — so the field taxonomy is Finder-owned.
+design — so the field taxonomy is Finder-owned, built on ISCED-F 2013
+(UNESCO's field-of-education classification) at two tiers:
+
+- **Broad** (11 codes, e.g. `ict`, `health_and_welfare`) — what `GET
+  /api/v1/taxonomies` offers a search form under `fields`, and what
+  `SearchRequest.field` accepts. Matches what a real searcher thinks in.
+- **Narrow** (29 codes, e.g. `ict`, `health`, `welfare`, `law`) — what a
+  scholarship is actually tagged with at publish time (`PublishCycleRequest.
+  fields`), exposed for reference under `GET /api/v1/taxonomies`'
+  `narrow_fields`. A search's broad choice is expanded to every narrow code
+  beneath it (`Taxonomy.narrow_fields_under`) before matching against a
+  scholarship's own narrow tags — see `domain/taxonomy.py` and
+  `domain/matching.py`.
 
 ## Tests
 
