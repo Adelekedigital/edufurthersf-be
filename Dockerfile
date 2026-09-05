@@ -5,6 +5,7 @@ COPY pyproject.toml uv.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY alembic.ini ./
+COPY parse_apis ./parse_apis
 RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
