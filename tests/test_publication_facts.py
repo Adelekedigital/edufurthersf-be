@@ -59,3 +59,16 @@ def test_no_deadline_means_no_precision_or_timezone_keys_at_all() -> None:
 def test_datetime_precision_can_be_requested_explicitly() -> None:
     facts = _facts(deadline_at=datetime(2026, 6, 30, 12, 0), deadline_precision="datetime")
     assert facts["deadline_precision"] == "datetime"
+
+
+def test_expected_reopen_month_is_stored_when_given() -> None:
+    facts = _facts(expected_reopen_month=6)
+    assert facts["expected_reopen_month"] == 6
+
+
+def test_no_expected_reopen_month_means_no_key_at_all() -> None:
+    """Absent, not null or guessed - the same honesty rule as origin_mode:
+    only a reviewer's real evidence of roughly when a scheme reopens belongs
+    here, never a default."""
+    facts = _facts()
+    assert "expected_reopen_month" not in facts

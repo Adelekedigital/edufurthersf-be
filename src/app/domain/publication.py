@@ -29,6 +29,7 @@ def build_cycle_facts(
     deadline_precision: Literal["date", "datetime"] = "date",
     deadline_timezone: str | None = None,
     eligibility_note: str | None = None,
+    expected_reopen_month: int | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
     """Return the validated, normalised `facts` JSONB for a ScholarshipCycle.
@@ -80,6 +81,8 @@ def build_cycle_facts(
     }
     if eligibility_note:
         facts["eligibility_note"] = eligibility_note
+    if expected_reopen_month is not None:
+        facts["expected_reopen_month"] = expected_reopen_month
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()
         facts["deadline_precision"] = deadline_precision

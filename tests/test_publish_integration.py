@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 
 from app.domain.models import AuditLog, OutboxEvent, Provider, RecordState, Scholarship
@@ -72,6 +74,38 @@ async def test_publish_makes_the_scholarship_findable(db, client) -> None:
 
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
     assert [row["name"] for row in results] == ["Award A"]
+
+
+async def test_expected_reopen_month_produces_opening_soon_status_detail(db, client) -> None:
+    """The month is dynamic (this-month, not a fixed one) so the assertion
+    holds regardless of when the suite actually runs."""
+    scholarship = await _approved_scholarship(db, slug="reopen-soon")
+    cycle = {
+        **CYCLE,
+        "public_status": "expected_to_reopen",
+        "expected_reopen_month": datetime.now(UTC).month,
+    }
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=cycle,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
+    assert [row["status_detail"] for row in results] == ["opening_soon"]
+
+
+async def test_no_expected_reopen_month_is_likely_to_reopen_not_opening_soon(db, client) -> None:
+    scholarship = await _approved_scholarship(db, slug="reopen-unknown")
+    cycle = {**CYCLE, "public_status": "expected_to_reopen"}
+    await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=cycle,
+        headers=AUTH,
+    )
+    results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
+    assert [row["status_detail"] for row in results] == ["likely_to_reopen"]
 
 
 async def test_publish_records_an_audit_entry_and_analytics_event(db, client) -> None:

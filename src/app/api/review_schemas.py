@@ -132,6 +132,13 @@ class PublishCycleRequest(BaseModel):
     #: external classification. Never used to avoid the honest origin_mode
     #: call; only for what's left once that call has been made.
     eligibility_note: str | None = Field(default=None, max_length=1000)
+    #: Month (1-12) a reviewer has real evidence a `public_status
+    #: ="expected_to_reopen"` cycle typically reopens in (e.g. a provider's
+    #: own "opens annually 1 June" statement) - never guessed. Powers the
+    #: "opening soon" vs. generic "likely to reopen" display distinction;
+    #: left unset when no such evidence exists, same honesty rule as
+    #: `origin_mode`/`eligibility_note`.
+    expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
 
 
 class PublishCycleResponse(BaseModel):

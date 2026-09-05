@@ -102,7 +102,7 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
     }
 
 
-async def test_search_accepts_any_origin_but_only_covered_destinations(db, client) -> None:
+async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
     await sync_countries(db, _FakeCore([_entry("KE", "Kenya"), _entry("CA", "Canada")]))
     base = {"program_level": "phd", "field": "public_health"}
 
@@ -111,12 +111,23 @@ async def test_search_accepts_any_origin_but_only_covered_destinations(db, clien
     )
     assert ok.status_code == 200, ok.text
 
-    # Kenya is a valid origin but the index has no verified coverage for it.
-    refused = await client.post(
+    # Kenya is a valid origin but the index has no verified coverage for it as
+    # a *destination*. The search still runs (200, real zero) rather than
+    # refusing the request outright - a real country with no coverage yet is
+    # not the same failure as an unrecognised one, and is disclosed via
+    # `meta.warnings` instead of a 422.
+    uncovered = await client.post(
         "/api/v1/search", json={**base, "origin_country": "KE", "target_countries": ["KE"]}
     )
+    assert uncovered.status_code == 200, uncovered.text
+    assert uncovered.json()["data"] == []
+    assert "no_verified_coverage:KE" in uncovered.json()["meta"]["warnings"]
+
+    # An outright-unrecognised code is still refused.
+    refused = await client.post(
+        "/api/v1/search", json={**base, "origin_country": "KE", "target_countries": ["ZZ"]}
+    )
     assert refused.status_code == 422
-    assert "coverage" in refused.text
 
 
 def test_origin_is_wider_than_destination() -> None:
@@ -131,12 +142,13 @@ def test_origin_is_wider_than_destination() -> None:
 
 
 def test_normalisation_falls_back_to_the_seed_without_a_vocabulary() -> None:
-    origin, destinations, degree, field = normalize_search_filters(
+    origin, destinations, uncovered, degree, field = normalize_search_filters(
         "NG", ["CA"], "phd", "public health"
     )
-    assert (origin, destinations, degree, field) == (
+    assert (origin, destinations, uncovered, degree, field) == (
         "NG",
         frozenset({"CA"}),
+        frozenset(),
         "doctorate",
         "public_health",
     )
