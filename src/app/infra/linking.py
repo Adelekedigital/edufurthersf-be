@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.linking import LinkOutcome, decide_link
 from app.domain.models import Discovery, ReviewTask, Scholarship
+from app.infra.jobs import enqueue_job
 
 
 async def link_discovery(db: AsyncSession, discovery_id: uuid.UUID) -> LinkOutcome:
@@ -49,12 +50,25 @@ async def _add_review_task_once(
     database (uq_review_tasks_open_per_discovery), the same way enqueue_job
     lets the dedupe_key's own unique index arbitrate concurrent inserts
     instead of trusting an application-level check.
+
+    A task actually created here is the only path a review task has into
+    existence, so it is also the one place to enqueue prepare_review for it -
+    a discovery relinked into its existing task must not re-draft it.
     """
-    await db.execute(
+    inserted = await db.execute(
         insert(ReviewTask)
         .values(discovery_id=discovery_id, reason=reason, priority=priority)
         .on_conflict_do_nothing(
             index_elements=["discovery_id"],
             index_where=text("state = 'open' AND resolution IS NULL"),
         )
+        .returning(ReviewTask.review_task_id)
     )
+    review_task_id = inserted.scalar_one_or_none()
+    if review_task_id is not None:
+        await enqueue_job(
+            db,
+            "prepare_review",
+            f"prepare_review:{review_task_id}",
+            {"review_task_id": str(review_task_id)},
+        )

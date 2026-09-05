@@ -516,6 +516,7 @@ def _search_result(
 async def review_queue(
     state: Literal["open", "resolved"] = "open",
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewQueueResponse:
     """The reviewer's work list, highest priority and oldest first.
@@ -537,6 +538,7 @@ async def review_queue(
             .outerjoin(SourcePage, SourcePage.page_id == Discovery.source_page_id)
             .where(ReviewTask.state == state)
             .order_by(ReviewTask.priority, ReviewTask.created_at)
+            .offset(offset)
             .limit(limit)
         )
     )
@@ -555,6 +557,7 @@ async def review_queue(
                 raw_title=raw_title,
                 raw_excerpt=raw_excerpt,
                 extracted_facts=extracted_facts,
+                draft_recommendation=task.draft_recommendation,
                 source_url=source_url,
                 created_at=task.created_at,
             )

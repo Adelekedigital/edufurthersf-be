@@ -61,7 +61,13 @@ async def test_run_due_executes_jobs_import_left_stuck(db, client) -> None:
     response = await client.post("/api/v1/internal/admin/jobs/run-due", headers=AUTH)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body == {"completed": 4, "failed": 0, "remaining": 0}
+    # Each link_canonical creating a new review task enqueues prepare_review
+    # as a side effect - too late to join this call's own due_jobs() batch,
+    # so both are still queued when this call's remaining count is taken.
+    assert body == {"completed": 4, "failed": 0, "remaining": 2}
+
+    second = await client.post("/api/v1/internal/admin/jobs/run-due", headers=AUTH)
+    assert second.json() == {"completed": 2, "failed": 0, "remaining": 0}
 
     states = {job.state for job in await db.scalars(select(ProcessingJob))}
     assert states == {"completed"}
@@ -77,7 +83,12 @@ async def test_run_due_is_safe_to_call_twice(db, client) -> None:
     assert first.json()["completed"] == 2
 
     second = await client.post("/api/v1/internal/admin/jobs/run-due", headers=AUTH)
-    assert second.json() == {"completed": 0, "failed": 0, "remaining": 0}
+    # Not a re-run: the first call's link_canonical enqueued prepare_review
+    # as a side effect, and this call is what actually executes it.
+    assert second.json() == {"completed": 1, "failed": 0, "remaining": 0}
+
+    third = await client.post("/api/v1/internal/admin/jobs/run-due", headers=AUTH)
+    assert third.json() == {"completed": 0, "failed": 0, "remaining": 0}
     assert len(list(await db.scalars(select(ReviewTask)))) == 1, "not re-run, not duplicated"
 
 
@@ -98,4 +109,6 @@ async def test_run_due_respects_its_limit_and_reports_remaining(db, client) -> N
     )
     body = response.json()
     assert body["completed"] == 2
-    assert body["remaining"] == 4
+    # 4 of the original 6 jobs untouched, plus 1 prepare_review enqueued as a
+    # side effect of the link_canonical this limited batch did complete.
+    assert body["remaining"] == 5

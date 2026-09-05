@@ -287,21 +287,24 @@ scope:
    extract structured candidate facts and explain deterministic matches").
    It needs a provider/API key/cost decision, not a policy decision -
    record that decision here once made.
-2. **Build `prepare_review`** (also an already-reserved job kind with no
-   handler) to run the *full* process this document describes - fetch the
-   cited source, find and fetch the real official page, cross-check every
-   claim, resolve country lists programmatically, apply the bars above -
-   and attach the result as a **drafted, not executed** recommendation on
-   the `ReviewTask` (proposed facts, proposed `award_type`, a verdict of
-   confident-pass/ambiguous/reject, and the reasoning trail). A human
-   reviewer then confirms or edits in one action, rather than starting from
-   raw prose each time. This is the highest-leverage next step and does
-   not cross the automation boundary: it explains and drafts, a human still
-   decides and publishes. Give it a cheap first pass before the expensive
-   one: a destination check against the discovery's own stated country
-   (see "Other countries" above) costs nothing next to a full fetch-and-
-   cross-check pipeline, and closed roughly half the full backlog by
-   itself once applied at scale.
+2. **`prepare_review` is now built** (`domain/review_draft.py`,
+   `infra/worker.py::_prepare_review`) - but only the cheap first pass this
+   item originally called for: a deterministic destination screen against
+   the discovery's own text, matched programmatically against the mirrored
+   country vocabulary (never hand-typed), same rule as "Other countries"
+   above. A clear out-of-scope country with no supported destination also
+   named drafts `verdict=reject`; everything else drafts `verdict=ambiguous`
+   - never `confident_pass`, because nothing here fetches or reads the real
+   official source yet. The draft (verdict, reasoning trail, whatever
+   `extract_candidate` already found, `proposed_award_type=None`) lands on
+   `ReviewTask.draft_recommendation` - never executed, never touching
+   `state`. A human reviewer still calls the existing decision endpoints.
+   The *expensive* half of this item - fetch the cited source, find and
+   fetch the real official page, cross-check every claim, resolve country
+   lists programmatically, apply the full bars above, and draft a real
+   `confident_pass` - still needs the AI Router + LLM extraction (item 1)
+   first; a regex/keyword heuristic cannot honestly claim to have verified
+   anything beyond the destination screen.
 3. **Use the bulk review-decision endpoint** (`POST
    /internal/admin/reviews/bulk-decision`, ≤10 per call, already built) for
    exactly the case that motivated it: many independent decisions with the
