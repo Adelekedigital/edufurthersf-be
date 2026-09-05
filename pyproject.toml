@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Edufurther Scholarship Finder backend"
 requires-python = ">=3.14"
 dependencies = [
+    "parse-apis",
   "fastapi[standard]>=0.115,<1",
   "pydantic-settings>=2.7,<3",
   "sqlalchemy[asyncio]>=2.0,<3",
@@ -17,6 +18,7 @@ dependencies = [
   # without this, every known provider timezone silently resolves as if it
   # were unknown, with no error at all.
   "tzdata>=2024.1",
+  "parse-sdk>=0.2.0",
 ]
 
 [build-system]
@@ -64,3 +66,25 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 pythonpath = [".", "src"]
+
+[tool.uv.sources]
+parse-apis = { path = "parse_apis", editable = true }
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
+[tool.parse]
+
+[[tool.parse.marketplace]]
+scraper_id = "d8ac1888-45af-4a2b-9aee-a54938204f94"
+slug = "scholarshipportal_com_api"
+version = 8
+listing_id = "0e51aa9d-8522-4bb1-b0d8-43c51dd65fc8"
+source_url = "https://scholarshipportal.com"
+
+[[tool.parse.marketplace]]
+scraper_id = "7939701b-6ecc-48e4-8084-b024250fa10c"
+slug = "phdscanner_com_api"
+version = 4
+listing_id = "213ba9dc-b996-4048-a231-62508f3c5c2d"
+source_url = "https://www.phdscanner.com/"
