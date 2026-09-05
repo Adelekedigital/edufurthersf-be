@@ -59,7 +59,7 @@ def test_outcome_never_includes_a_publish_or_verify_state() -> None:
     outcome value that could be mistaken for one."""
     assert AIRouterOutcome.__members__.keys() == {
         "completed",
-        "invalid_schema",
+        "review",
         "budget_exhausted",
         "provider_unavailable",
     }

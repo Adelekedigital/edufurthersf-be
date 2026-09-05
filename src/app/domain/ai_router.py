@@ -60,7 +60,14 @@ class AIRouterRequest:
 
 class AIRouterOutcome(StrEnum):
     completed = "completed"
-    invalid_schema = "invalid_schema"
+    #: The terminal status for a request the router couldn't complete
+    #: confidently - invalid schema, missing evidence, or anything else that
+    #: needs a human. Confirmed against the real deployed router and
+    #: 06-analytics-ai-standard.md (v1.2) line 143/152/163: "invalid schema"
+    #: is the *validation failure reason*, "review" is the terminal status -
+    #: they are not the same field, and the router's own TerminalStatus enum
+    #: uses "review", never "invalid_schema".
+    review = "review"
     budget_exhausted = "budget_exhausted"
     provider_unavailable = "provider_unavailable"
 
