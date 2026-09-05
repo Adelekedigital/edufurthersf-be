@@ -49,9 +49,11 @@ searching `health_and_welfare` specifically still fails to surface the one
 scholarship literally named "Doctor of Public Health" - exactly backwards
 from what a real searcher choosing that field would expect.
 
-**Status as of this test: not yet fixed.** A scoped one-off remap
-(`fix_stale_field_tags.py`, touches only these 2 known rows by cycle ID) is
-ready to run - see the PR/session notes for the exact command.
+**Status: fixed.** A scoped one-off remap (`fix_stale_field_tags.py`, touched
+only these 2 known rows by cycle ID) has landed - re-verified live:
+`CA doctorate + health_and_welfare` now includes "Doctor of Public Health
+Scholarships (Mastercard Foundation)", and `GB masters + ict` now includes
+"Optiver Foundation Scholarships".
 
 ## Full 50-profile grid (raw, origin varies per cell - see confound note above)
 
