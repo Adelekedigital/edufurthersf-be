@@ -1,6 +1,7 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.linking import LinkOutcome, decide_link
@@ -41,17 +42,19 @@ async def _add_review_task_once(
 
     QStash and the admin runner are both at-least-once execution paths. The
     processing-job dedupe key prevents duplicate jobs, but an already-created
-    job can still be replayed while older data is being repaired. Review-task
-    creation therefore needs its own idempotency guard as well.
+    job can still be replayed while older data is being repaired - including
+    two overlapping runs of the job itself, not just a resend of the same
+    message. A check-then-insert here still leaves a real race between the
+    SELECT and the INSERT, so the uniqueness has to be enforced by the
+    database (uq_review_tasks_open_per_discovery), the same way enqueue_job
+    lets the dedupe_key's own unique index arbitrate concurrent inserts
+    instead of trusting an application-level check.
     """
-    existing = await db.scalar(
-        select(ReviewTask.review_task_id)
-        .where(
-            ReviewTask.discovery_id == discovery_id,
-            ReviewTask.state == "open",
-            ReviewTask.resolution.is_(None),
+    await db.execute(
+        insert(ReviewTask)
+        .values(discovery_id=discovery_id, reason=reason, priority=priority)
+        .on_conflict_do_nothing(
+            index_elements=["discovery_id"],
+            index_where=text("state = 'open' AND resolution IS NULL"),
         )
-        .limit(1)
     )
-    if existing is None:
-        db.add(ReviewTask(discovery_id=discovery_id, reason=reason, priority=priority))

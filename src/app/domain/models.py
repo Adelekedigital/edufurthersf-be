@@ -7,11 +7,13 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -298,6 +300,20 @@ class VerificationEvidence(TimestampMixin, Base):
 
 class ReviewTask(TimestampMixin, Base):
     __tablename__ = "review_tasks"
+    __table_args__ = (
+        # A discovery may only have one live (open, un-annotated) task at a
+        # time - concurrent job delivery (QStash redelivery racing a manual
+        # run-due sweep, or two overlapping sweeps) must not be able to spawn
+        # a second one. Scoped to the same open+unresolved state the
+        # application's own check already uses, so a discovery can still gain
+        # a fresh task later once its current one is resolved.
+        Index(
+            "uq_review_tasks_open_per_discovery",
+            "discovery_id",
+            unique=True,
+            postgresql_where=text("state = 'open' AND resolution IS NULL"),
+        ),
+    )
     review_task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=new_uuid7
     )

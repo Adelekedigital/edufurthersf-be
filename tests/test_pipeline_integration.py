@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.ingestion_schemas import FeedRecord
 from app.api.review_schemas import ReviewDecisionRequest
@@ -317,3 +318,22 @@ async def test_relinking_a_discovery_does_not_duplicate_its_open_review_task(db)
         )
     )
     assert len(tasks) == 1
+
+
+async def test_the_database_refuses_a_second_open_task_for_one_discovery(db) -> None:
+    """The regression itself: two overlapping job executions each passed an
+    application-level check before either had committed, so a discovery
+    ended up with duplicate open review tasks in production. Uniqueness has
+    to be enforced by the schema to survive that race, not just by logic in
+    the code path both executions run - this bypasses that code path
+    entirely and inserts straight into the table."""
+    source = await _source(db)
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/b", "Award B")])
+    discovery = await db.scalar(select(Discovery))
+
+    db.add(ReviewTask(discovery_id=discovery.discovery_id, reason="new_candidate"))
+    await db.commit()
+
+    db.add(ReviewTask(discovery_id=discovery.discovery_id, reason="new_candidate"))
+    with pytest.raises(IntegrityError):
+        await db.commit()
