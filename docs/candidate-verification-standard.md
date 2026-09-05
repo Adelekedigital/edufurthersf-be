@@ -53,9 +53,11 @@ best-effort publish.
      recurrence (Commonwealth Shared Scholarships' 2026/27→2027/28 naming).
    - `status_unknown` when recurrence itself isn't evidenced.
 4. **No taxonomy-forcing.** `field_mode=unknown` when the field doesn't
-   cleanly map to the two real field codes (`public_health`,
-   `computer_science`) - true for nearly everything checked this session,
-   and that's fine, it's honest. `destinations` limited to the five actually
+   cleanly map to a real field code. (At the time of this pass, the taxonomy
+   held only two codes - `public_health`, `computer_science` - so this was
+   true for nearly everything checked; it's since been expanded to the full
+   ISCED-F 2013 narrow-field list, 29 codes across 11 broad fields, see
+   `domain/taxonomy.py`.) `destinations` limited to the five actually
    supported (`CA`, `GB`, `US`, `DE`, `FI`); an Erasmus Mundus-style
    multi-country consortium only counts if the applicant's actual study
    country is *guaranteed* to be one of those five, not merely possible.

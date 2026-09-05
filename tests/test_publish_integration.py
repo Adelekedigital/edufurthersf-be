@@ -21,14 +21,14 @@ CYCLE = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["public_health"],
+    "fields": ["health"],
     "evidence_fresh": True,
 }
 
 SEARCH = {
     "origin_country": "NG",
     "program_level": "masters",
-    "field": "public_health",
+    "field": "health_and_welfare",
     "target_countries": ["CA"],
 }
 

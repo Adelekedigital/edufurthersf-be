@@ -24,7 +24,7 @@ pytestmark = requires_db
 SEARCH = {
     "origin_country": "NG",
     "program_level": "masters",
-    "field": "public_health",
+    "field": "health_and_welfare",
     "target_countries": ["CA", "GB"],
 }
 
@@ -33,7 +33,7 @@ CONFIRMED_FACTS = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["public_health"],
+    "fields": ["health"],
     "evidence_fresh": True,
 }
 POSSIBLE_FACTS = {**CONFIRMED_FACTS, "origin_mode": "unknown", "field_mode": "unknown"}
@@ -179,10 +179,9 @@ async def test_an_unrecognised_country_is_still_rejected(db, client) -> None:
 
 
 async def test_no_field_preference_still_finds_a_field_restricted_scholarship(db, client) -> None:
-    """A searcher whose real field (Law, Business, ...) isn't one of the two
-    taxonomy codes must be able to search with no field at all, and still see
-    scholarships that are restricted to a *specific* field - they just aren't
-    excluded by a preference they never expressed."""
+    """A searcher with no field preference at all must still see scholarships
+    that are restricted to a *specific* field - they just aren't excluded by
+    a preference they never expressed."""
     await _publish(db, slug="cs-only", facts=CONFIRMED_FACTS, status=PublicStatus.open_verified)
     no_field_search = {k: v for k, v in SEARCH.items() if k != "field"}
     body = (await client.post("/api/v1/search", json=no_field_search)).json()

@@ -8,8 +8,11 @@ class SearchProfile:
     target_countries: frozenset[str]
     program_level: str
     #: None means "no field preference" - never excludes a field_mode="restricted"
-    #: record, since the searcher isn't filtering on field at all.
-    field: str | None
+    #: record, since the searcher isn't filtering on field at all. Otherwise
+    #: the set of narrow ISCED-F codes accepted for the searcher's broad
+    #: field choice (see `taxonomy.normalize_search_filters`) - a scholarship
+    #: matches if any of its own narrow-tagged fields falls in this set.
+    fields: frozenset[str] | None
 
 
 @dataclass(frozen=True)
@@ -39,16 +42,20 @@ def evaluate_match(profile: SearchProfile, facts: dict[str, Any]) -> MatchDecisi
         return None
     field_mode = facts.get("field_mode", "unknown")
     fields = {_normalise(str(v)) for v in facts.get("fields", [])}
+    accepted_fields = (
+        {_normalise(v) for v in profile.fields} if profile.fields is not None else None
+    )
     if (
         field_mode == "restricted"
-        and profile.field is not None
-        and _normalise(profile.field) not in fields
+        and accepted_fields is not None
+        and fields.isdisjoint(accepted_fields)
     ):
         return None
     possible = origin_mode == "unknown" or field_mode == "unknown"
     score = 0
     reasons: list[str] = []
-    if field_mode == "all" or (profile.field is not None and _normalise(profile.field) in fields):
+    field_compatible = accepted_fields is not None and not fields.isdisjoint(accepted_fields)
+    if field_mode == "all" or field_compatible:
         score += 25
         reasons.append("field_compatible")
     if origin_mode == "unrestricted" or _normalise(profile.origin_country) in origins:

@@ -21,7 +21,7 @@ CYCLE = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["public_health"],
+    "fields": ["health"],
     "evidence_fresh": True,
 }
 

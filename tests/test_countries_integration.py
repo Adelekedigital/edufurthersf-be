@@ -104,7 +104,7 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
 
 async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
     await sync_countries(db, _FakeCore([_entry("KE", "Kenya"), _entry("CA", "Canada")]))
-    base = {"program_level": "phd", "field": "public_health"}
+    base = {"program_level": "phd", "field": "health_and_welfare"}
 
     ok = await client.post(
         "/api/v1/search", json={**base, "origin_country": "KE", "target_countries": ["CA"]}
@@ -142,7 +142,7 @@ def test_origin_is_wider_than_destination() -> None:
 
 
 def test_normalisation_falls_back_to_the_seed_without_a_vocabulary() -> None:
-    origin, destinations, uncovered, degree, field = normalize_search_filters(
+    origin, destinations, uncovered, degree, field, accepted_fields = normalize_search_filters(
         "NG", ["CA"], "phd", "public health"
     )
     assert (origin, destinations, uncovered, degree, field) == (
@@ -150,5 +150,6 @@ def test_normalisation_falls_back_to_the_seed_without_a_vocabulary() -> None:
         frozenset({"CA"}),
         frozenset(),
         "doctorate",
-        "public_health",
+        "health_and_welfare",
     )
+    assert accepted_fields == {"health", "welfare"}

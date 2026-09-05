@@ -17,7 +17,11 @@ class TaxonomiesResponse(BaseModel):
     #: The subset with verified coverage, which is where a search can be run.
     destinations: list[TaxonomyItem]
     degrees: list[TaxonomyItem]
+    #: Broad ISCED-F 2013 fields (11 codes) - what a search form offers.
     fields: list[TaxonomyItem]
+    #: Narrow ISCED-F 2013 fields (29 codes) - what a scholarship is actually
+    #: tagged with at publish time; not a search filter itself.
+    narrow_fields: list[TaxonomyItem]
     award_types: list[TaxonomyItem]
 
 
@@ -26,9 +30,8 @@ class SearchRequest(BaseModel):
     # Validated against the taxonomy rather than pinned here, so accepted
     # aliases ("phd") resolve to the canonical Core-aligned code in one place.
     program_level: str = Field(min_length=1, max_length=40)
-    #: Optional: the taxonomy holds only two codes today, so forcing a choice
-    #: between exactly two subjects would misrepresent every other field of
-    #: study. Omit (or send null) for no field preference.
+    #: Optional broad ISCED-F field code (see GET /taxonomies `fields`).
+    #: Omit (or send null) for no field preference.
     field: str | None = Field(default=None, max_length=100)
     target_countries: list[str] = Field(min_length=1, max_length=10)
     limit: int = Field(default=20, ge=1, le=50)
