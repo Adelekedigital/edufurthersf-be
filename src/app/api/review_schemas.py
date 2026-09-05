@@ -63,6 +63,10 @@ class ReviewTaskSummary(BaseModel):
     #: reviewer head start, never a verified fact. Null until extract_candidate
     #: has run for this discovery.
     extracted_facts: dict | None = None
+    #: prepare_review's drafted proposal (verdict, proposed facts/award_type,
+    #: reasoning trail) for this reviewer to confirm or edit - never a
+    #: decision. Null until prepare_review has run.
+    draft_recommendation: dict | None = None
     created_at: datetime
 
 

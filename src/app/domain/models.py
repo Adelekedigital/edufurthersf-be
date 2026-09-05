@@ -327,6 +327,9 @@ class ReviewTask(TimestampMixin, Base):
     priority: Mapped[int] = mapped_column(Integer, default=100)
     state: Mapped[str] = mapped_column(String(30), default="open")
     resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: prepare_review's drafted proposal (verdict, proposed facts/award_type,
+    #: reasoning trail) - never a decision. Null until prepare_review has run.
+    draft_recommendation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ProcessingJob(TimestampMixin, Base):

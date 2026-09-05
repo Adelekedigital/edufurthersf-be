@@ -5,10 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.domain.extraction import extract_candidate_facts
-from app.domain.models import Discovery
+from app.domain.models import Discovery, ReviewTask
 from app.domain.normalization import normalize_discovery
+from app.domain.review_draft import draft_review_recommendation
 from app.infra.core_catalogue import CoreCatalogueClient
-from app.infra.countries import sync_countries
+from app.infra.countries import load_vocabulary, sync_countries
 from app.infra.jobs import (
     claim_job_for_execution,
     complete_job,
@@ -38,6 +39,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await _sync_countries(db)
         elif job.kind == "extract_candidate":
             await _extract_candidate(db, job.payload)
+        elif job.kind == "prepare_review":
+            await _prepare_review(db, job.payload)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.
@@ -80,4 +83,32 @@ async def _extract_candidate(db: AsyncSession, payload: dict) -> None:
     if discovery is None:
         raise LookupError("Discovery not found")
     discovery.extracted_facts = extract_candidate_facts(discovery.raw_title, discovery.raw_excerpt)
+    await db.commit()
+
+
+async def _prepare_review(db: AsyncSession, payload: dict) -> None:
+    review_task = await db.scalar(
+        select(ReviewTask)
+        .where(ReviewTask.review_task_id == uuid.UUID(payload["review_task_id"]))
+        .with_for_update()
+    )
+    if review_task is None:
+        raise LookupError("Review task not found")
+    if review_task.discovery_id is None:
+        # ReviewTask.discovery_id is nullable for a revision-linked task with
+        # no single discovery of its own; nothing here can draft a
+        # destination screen without one.
+        return
+    discovery = await db.scalar(
+        select(Discovery).where(Discovery.discovery_id == review_task.discovery_id)
+    )
+    if discovery is None:
+        raise LookupError("Discovery not found")
+    vocabulary = await load_vocabulary(db)
+    review_task.draft_recommendation = draft_review_recommendation(
+        raw_title=discovery.raw_title,
+        raw_excerpt=discovery.raw_excerpt,
+        extracted_facts=discovery.extracted_facts,
+        country_names=vocabulary.names,
+    )
     await db.commit()
