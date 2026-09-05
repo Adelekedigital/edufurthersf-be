@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.domain.models import (
     AnonymousSession,
+    Country,
     Provider,
     PublicStatus,
     RecordState,
@@ -122,6 +123,59 @@ async def test_unsupported_filters_are_rejected(client, bad_field: str) -> None:
     response = await client.post("/api/v1/search", json={**SEARCH, "field": bad_field})
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
+
+
+async def _seed_countries(db) -> None:
+    """NG (origin), CA (a real, verified-coverage destination), FR (a real
+    country with no verified destination coverage yet)."""
+    for code, name, is_destination in (
+        ("NG", "Nigeria", False),
+        ("CA", "Canada", True),
+        ("FR", "France", False),
+    ):
+        db.add(Country(code=code, display_name=name, is_supported_destination=is_destination))
+    await db.commit()
+
+
+async def test_uncovered_destination_alongside_a_covered_one_still_runs(db, client) -> None:
+    """The search must never be refused outright because one requested
+    destination, among several, isn't verified coverage yet - it runs for
+    the covered ones and says explicitly which weren't."""
+    await _seed_countries(db)
+    await _publish(db, slug="ca-award", facts=CONFIRMED_FACTS, status=PublicStatus.open_verified)
+    response = await client.post(
+        "/api/v1/search",
+        json={**SEARCH, "target_countries": ["CA", "FR"]},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["name"] for item in body["data"]] == ["Award ca-award"]
+    assert "no_verified_coverage:FR" in body["meta"]["warnings"]
+
+
+async def test_every_requested_destination_uncovered_is_200_not_422(db, client) -> None:
+    """A real country with no coverage yet is not the same failure as an
+    outright-invalid one - it's an honest, explicit zero, not a 422."""
+    await _seed_countries(db)
+    response = await client.post(
+        "/api/v1/search",
+        json={**SEARCH, "target_countries": ["FR"]},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["data"] == []
+    assert "no_verified_coverage:FR" in body["meta"]["warnings"]
+
+
+async def test_an_unrecognised_country_is_still_rejected(db, client) -> None:
+    """Distinct from an uncovered-but-real destination: this isn't a
+    country at all, and stays a 422."""
+    await _seed_countries(db)
+    response = await client.post(
+        "/api/v1/search",
+        json={**SEARCH, "target_countries": ["ZZ"]},
+    )
+    assert response.status_code == 422
 
 
 async def test_no_field_preference_still_finds_a_field_restricted_scholarship(db, client) -> None:

@@ -42,6 +42,13 @@ class SearchResult(BaseModel):
     provider: str
     award_type: str
     status: str
+    #: A display-only refinement of `status`: "open"/"closing_soon" for
+    #: open_verified, "opening_soon"/"likely_to_reopen" for
+    #: expected_to_reopen (the latter two distinguished only when a reviewer
+    #: has real evidence of roughly when), "status_unknown" otherwise. Never
+    #: use this in place of `status` for eligibility logic - it's presentation
+    #: detail, not the business state.
+    status_detail: str
     fit: Literal["confirmed", "possible"]
     official_url: str
     last_verified_at: datetime | None = None

@@ -67,7 +67,7 @@ from app.domain.models import (
 from app.domain.publication import build_cycle_facts
 from app.domain.return_urls import is_allowed_return_url
 from app.domain.snapshots import build_result_snapshot
-from app.domain.status import evaluate_public_status
+from app.domain.status import evaluate_public_status, evaluate_status_detail
 from app.domain.taxonomy import TAXONOMY, normalize_search_filters
 from app.infra.core_client import CoreJoinClient
 from app.infra.countries import load_vocabulary
@@ -498,13 +498,24 @@ def _search_result(
     award was open.
     """
     facts = row.facts or {}
-    deadline_at = facts.get("deadline_at")
+    deadline_at_raw = facts.get("deadline_at")
+    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
+    deadline_precision = facts.get("deadline_precision", "datetime")
+    deadline_timezone = facts.get("deadline_timezone")
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=datetime.fromisoformat(deadline_at) if deadline_at else None,
-        deadline_precision=facts.get("deadline_precision", "datetime"),
-        deadline_timezone=facts.get("deadline_timezone"),
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=deadline_timezone,
         status_valid_until=row.status_valid_until,
+        now=evaluated_at,
+    )
+    status_detail = evaluate_status_detail(
+        status,
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=deadline_timezone,
+        expected_reopen_month=facts.get("expected_reopen_month"),
         now=evaluated_at,
     )
     caveats = list(decision.caveats)
@@ -519,6 +530,7 @@ def _search_result(
         else "",
         award_type=row.scholarship.award_type if row.scholarship else "",
         status=status.value,
+        status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=facts.get("eligibility_note"),
         official_url=row.official_cycle_url,
@@ -649,6 +661,7 @@ async def publish(
             deadline_precision=payload.deadline_precision,
             deadline_timezone=payload.deadline_timezone,
             eligibility_note=payload.eligibility_note,
+            expected_reopen_month=payload.expected_reopen_month,
             countries=countries,
         )
     except ValueError as exc:
@@ -718,13 +731,26 @@ async def run_due_jobs_route(
 
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     facts = row.facts or {}
-    deadline_at = facts.get("deadline_at")
+    deadline_at_raw = facts.get("deadline_at")
+    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
+    deadline_precision = facts.get("deadline_precision", "datetime")
+    deadline_timezone = facts.get("deadline_timezone")
+    evaluated_at = datetime.now(UTC)
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=datetime.fromisoformat(deadline_at) if deadline_at else None,
-        deadline_precision=facts.get("deadline_precision", "datetime"),
-        deadline_timezone=facts.get("deadline_timezone"),
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=deadline_timezone,
         status_valid_until=row.status_valid_until,
+        now=evaluated_at,
+    )
+    status_detail = evaluate_status_detail(
+        status,
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=deadline_timezone,
+        expected_reopen_month=facts.get("expected_reopen_month"),
+        now=evaluated_at,
     )
     caveats: list[str] = []
     if status != row.public_status:
@@ -736,6 +762,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         provider=row.scholarship.provider.name,
         award_type=row.scholarship.award_type,
         status=status.value,
+        status_detail=status_detail,
         status_valid_until=row.status_valid_until,
         official_url=row.official_cycle_url,
         facts=facts,
@@ -785,7 +812,11 @@ async def create_join_intent(
     settings = get_settings()
     session = await get_or_create_session(db, response, request.cookies.get(SESSION_COOKIE))
     if not join_limiter.allow(str(session.session_id), JOIN_INTENTS_PER_MINUTE):
-        raise HTTPException(status_code=429, detail="Join request rate limit exceeded")
+        raise HTTPException(
+            status_code=429,
+            detail="Join request rate limit exceeded",
+            headers={"Retry-After": "60"},
+        )
     if not all(
         (
             settings.core_join_intent_url,
@@ -853,12 +884,14 @@ async def search(
     # chooses its own cookie value and could mint a fresh bucket per request.
     limiter_key = request.client.host if request.client else "unknown"
     if not search_limiter.allow(limiter_key, settings.api_rate_limit_per_minute):
-        raise HTTPException(status_code=429, detail="Search rate limit exceeded")
+        raise HTTPException(
+            status_code=429, detail="Search rate limit exceeded", headers={"Retry-After": "60"}
+        )
     evaluated_at = datetime.now(UTC)
     started = perf_counter()
     countries = await load_vocabulary(db)
     try:
-        origin, destinations, degree, field = normalize_search_filters(
+        origin, destinations, uncovered_destinations, degree, field = normalize_search_filters(
             payload.origin_country,
             payload.target_countries,
             payload.program_level,
@@ -867,6 +900,13 @@ async def search(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    warnings: list[str] = []
+    if uncovered_destinations:
+        # Never refuse the whole search because one requested destination
+        # among several isn't covered yet - run it for whichever are, and say
+        # plainly which ones weren't, rather than silently returning fewer
+        # results than requested with no explanation.
+        warnings.append(f"no_verified_coverage:{','.join(sorted(uncovered_destinations))}")
     profile = SearchProfile(origin, destinations, degree, field)
     filters = {
         "origin_country": origin,
@@ -895,7 +935,6 @@ async def search(
         .limit(PUBLISHED_CYCLE_SCAN_LIMIT + 1)
     )
     rows = result.scalars().all()
-    warnings: list[str] = []
     if len(rows) > PUBLISHED_CYCLE_SCAN_LIMIT:
         # Matching happens in Python, so the index has outgrown one scan. Say so
         # rather than quietly returning a subset as though it were complete.

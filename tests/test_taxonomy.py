@@ -1,27 +1,59 @@
 import pytest
 
+from app.domain.countries import CountryVocabulary
 from app.domain.taxonomy import TAXONOMY, normalize_search_filters
+
+#: France is a real, nameable country with no verified destination coverage -
+#: distinct from "ZZ" below, which isn't a country in this vocabulary at all.
+VOCAB = CountryVocabulary(
+    names={"NG": "Nigeria", "CA": "Canada", "FR": "France"},
+    destinations=frozenset({"CA"}),
+)
 
 
 def test_aliases_are_normalized() -> None:
-    origin, destinations, degree, field = normalize_search_filters("ng", ["ca"], "masters", "MPH")
+    origin, covered, uncovered, degree, field = normalize_search_filters(
+        "ng", ["ca"], "masters", "MPH", VOCAB
+    )
     assert origin == "NG"
-    assert destinations == {"CA"}
+    assert covered == {"CA"}
+    assert uncovered == set()
     assert degree == "masters"
     assert field == "public_health"
 
 
-def test_unknown_taxonomy_value_is_rejected() -> None:
+def test_an_unrecognised_country_is_rejected() -> None:
+    """Not a real country at all - distinct from a real country we simply
+    don't have verified destination coverage for."""
     with pytest.raises(ValueError):
-        normalize_search_filters("NG", ["XX"], "masters", "public_health")
+        normalize_search_filters("NG", ["ZZ"], "masters", "public_health", VOCAB)
+
+
+def test_a_real_country_without_coverage_is_not_rejected() -> None:
+    """The search still runs for whichever destinations are covered - it
+    never refuses the whole request because one requested destination, real
+    but uncovered, was included alongside a covered one."""
+    origin, covered, uncovered, _, _ = normalize_search_filters(
+        "NG", ["CA", "FR"], "masters", "public_health", VOCAB
+    )
+    assert covered == {"CA"}
+    assert uncovered == {"FR"}
+
+
+def test_every_requested_destination_uncovered_still_does_not_raise() -> None:
+    _, covered, uncovered, _, _ = normalize_search_filters(
+        "NG", ["FR"], "masters", "public_health", VOCAB
+    )
+    assert covered == set()
+    assert uncovered == {"FR"}
 
 
 def test_no_field_preference_passes_through_as_none() -> None:
     """The taxonomy only holds two field codes - forcing a choice between
     exactly two subjects would misrepresent every other field of study."""
-    _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", None)
+    _, _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", None, VOCAB)
     assert field is None
-    _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", "")
+    _, _, _, _, field = normalize_search_filters("NG", ["CA"], "masters", "", VOCAB)
     assert field is None
 
 

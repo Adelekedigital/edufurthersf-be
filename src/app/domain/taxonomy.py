@@ -89,12 +89,21 @@ def normalize_search_filters(
     program_level: str,
     field: str | None,
     countries: CountryVocabulary | None = None,
-) -> tuple[str, frozenset[str], str, str | None]:
-    """Normalise the four inputs, or say which one is unsupported.
+) -> tuple[str, frozenset[str], frozenset[str], str, str | None]:
+    """Normalise the five inputs, or say which one is unsupported.
 
     Countries come from the mirrored vocabulary when one is supplied, so origin
     accepts any country Core publishes while destinations stay limited to
-    verified coverage.
+    verified coverage - but unlike the publish path (which must keep refusing
+    a destination outside coverage, since that would be a false claim baked
+    into the catalogue), a *search* for an uncovered destination is never
+    refused outright. Every requested destination is validated as a real
+    country (`vocabulary.origin`, not `vocabulary.destination` - that method
+    stays strict for publish), then split into `covered` (searched for real)
+    and `uncovered` (a genuine, nameable country we just don't have verified
+    coverage for yet). The caller surfaces `uncovered` as an explicit warning
+    rather than silently returning fewer results than requested, or refusing
+    the whole search because one destination among several isn't covered yet.
 
     `field` is the one genuinely optional filter: the taxonomy only holds two
     codes today, so forcing every searcher to pick one of exactly two subjects
@@ -107,8 +116,8 @@ def normalize_search_filters(
         names=dict(SEED_COUNTRIES), destinations=SUPPORTED_DESTINATIONS
     )
     origin = vocabulary.origin(origin_country)
-    destinations = frozenset(vocabulary.destination(value) for value in target_countries)
-    if not destinations:
-        raise ValueError("At least one destination is required")
+    requested = frozenset(vocabulary.origin(value) for value in target_countries)
+    covered = frozenset(code for code in requested if code in vocabulary.destinations)
+    uncovered = requested - covered
     normalized_field = TAXONOMY.field(field) if field else None
-    return origin, destinations, TAXONOMY.degree(program_level), normalized_field
+    return origin, covered, uncovered, TAXONOMY.degree(program_level), normalized_field

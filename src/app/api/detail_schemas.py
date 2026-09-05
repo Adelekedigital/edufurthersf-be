@@ -11,6 +11,8 @@ class ScholarshipDetailResponse(BaseModel):
     provider: str
     award_type: str
     status: str
+    #: See `SearchResult.status_detail` - the same display-only refinement.
+    status_detail: str
     status_valid_until: datetime | None
     official_url: str
     facts: dict = Field(default_factory=dict)
