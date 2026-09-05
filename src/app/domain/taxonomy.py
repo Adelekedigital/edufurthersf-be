@@ -87,14 +87,21 @@ def normalize_search_filters(
     origin_country: str,
     target_countries: list[str],
     program_level: str,
-    field: str,
+    field: str | None,
     countries: CountryVocabulary | None = None,
-) -> tuple[str, frozenset[str], str, str]:
+) -> tuple[str, frozenset[str], str, str | None]:
     """Normalise the four inputs, or say which one is unsupported.
 
     Countries come from the mirrored vocabulary when one is supplied, so origin
     accepts any country Core publishes while destinations stay limited to
     verified coverage.
+
+    `field` is the one genuinely optional filter: the taxonomy only holds two
+    codes today, so forcing every searcher to pick one of exactly two subjects
+    misrepresents anyone whose real field is neither - a Law or Business
+    applicant had no honest value to send. `None` (or an empty string) means
+    "no field preference," validated the same way `evaluate_match` already
+    treats a scholarship's own `field_mode="unknown"`: not excluded by field.
     """
     vocabulary = countries or CountryVocabulary(
         names=dict(SEED_COUNTRIES), destinations=SUPPORTED_DESTINATIONS
@@ -103,4 +110,5 @@ def normalize_search_filters(
     destinations = frozenset(vocabulary.destination(value) for value in target_countries)
     if not destinations:
         raise ValueError("At least one destination is required")
-    return origin, destinations, TAXONOMY.degree(program_level), TAXONOMY.field(field)
+    normalized_field = TAXONOMY.field(field) if field else None
+    return origin, destinations, TAXONOMY.degree(program_level), normalized_field

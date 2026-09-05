@@ -52,3 +52,22 @@ def test_destination_is_a_hard_gate() -> None:
         )
         is None
     )
+
+
+def test_no_field_preference_never_excludes_a_field_restricted_record() -> None:
+    """A searcher with no field preference (e.g. their real field - Law,
+    Business - isn't one of the two taxonomy codes) must still see every
+    destination/level/origin-eligible record, not just field_mode="all" ones."""
+    no_field_profile = SearchProfile("NG", frozenset({"CA"}), "masters", None)
+    decision = evaluate_match(
+        no_field_profile,
+        {
+            "destinations": ["CA"],
+            "levels": ["masters"],
+            "origin_mode": "unrestricted",
+            "field_mode": "restricted",
+            "fields": ["computer_science"],
+        },
+    )
+    assert decision is not None
+    assert "field_compatible" not in decision.reason_codes

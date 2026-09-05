@@ -26,7 +26,10 @@ class SearchRequest(BaseModel):
     # Validated against the taxonomy rather than pinned here, so accepted
     # aliases ("phd") resolve to the canonical Core-aligned code in one place.
     program_level: str = Field(min_length=1, max_length=40)
-    field: str = Field(min_length=1, max_length=100)
+    #: Optional: the taxonomy holds only two codes today, so forcing a choice
+    #: between exactly two subjects would misrepresent every other field of
+    #: study. Omit (or send null) for no field preference.
+    field: str | None = Field(default=None, max_length=100)
     target_countries: list[str] = Field(min_length=1, max_length=10)
     limit: int = Field(default=20, ge=1, le=50)
     cursor: str | None = None
