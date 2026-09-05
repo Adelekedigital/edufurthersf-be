@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+# Parse SDK's generated manifest maps marketplace scraper_id UUIDs to API
+# slugs - high-entropy strings that trip the generic-api-key heuristic, but
+# not secrets: the same scraper_id values are already in plain sight in the
+# committed pyproject.toml's [[tool.parse.marketplace]] blocks.
+paths = [
+  '''parse_apis/src/parse_apis/_manifest\.json''',
+]
