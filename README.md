@@ -240,6 +240,30 @@ Two independent, deliberately separate kill switches:
   app itself does. `create`/`status`/`resume`/`delete` are the other
   subcommands; a fresh schedule defaults to every Monday 06:00 UTC.
 
+**Current deployment (development/staging, `edufurthersf-be-dev`):** a
+schedule is live, `scheduleId=scd_551udc3u5Kp6ATYPqvDUVESYasDa`, created
+2026-09-05. `status` doesn't need the ID (it lists every schedule on the
+account); `pause`/`resume`/`delete` do. Ready-to-run, no placeholders to
+fill in:
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_parsebot_schedule.py status
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_parsebot_schedule.py pause `
+  --schedule-id scd_551udc3u5Kp6ATYPqvDUVESYasDa
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_parsebot_schedule.py resume `
+  --schedule-id scd_551udc3u5Kp6ATYPqvDUVESYasDa
+```
+
+If the schedule is ever deleted and recreated, `create` returns a new
+`scheduleId` - update it here, since a stale ID in this doc would send
+someone to pause a schedule that no longer exists while the real one keeps
+running.
+
 A QStash *schedule* redelivers one static request body on every firing.
 `ProcessingJob.dedupe_key` is permanently unique, so naively reusing that
 static body's key would let only the first-ever delivery actually run —
