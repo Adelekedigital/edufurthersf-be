@@ -42,6 +42,12 @@ class SearchResult(BaseModel):
     fit: Literal["confirmed", "possible"]
     official_url: str
     last_verified_at: datetime | None = None
+    #: A real restriction origin_mode/field_mode cannot represent
+    #: structurally (an exclude-one rule, an immigration status, a
+    #: demographic restriction) - a distinct field so a frontend can render
+    #: it as its own label, not lost inside generic matching/freshness
+    #: caveats.
+    eligibility_note: str | None = None
     caveats: list[str] = Field(default_factory=list)
 
 

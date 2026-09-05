@@ -151,11 +151,13 @@ async def test_publishing_an_unknown_scholarship_is_a_404(client) -> None:
     assert response.status_code == 404
 
 
-async def test_an_eligibility_note_surfaces_as_a_search_caveat(db, client) -> None:
+async def test_an_eligibility_note_surfaces_as_its_own_field_not_a_caveat(db, client) -> None:
     """origin_mode/origins cannot represent every real restriction (an
-    exclude-one rule, an immigration status) - eligibility_note is what is
-    left once that honest call has been made, and it must reach a searcher,
-    not just sit unread in stored facts."""
+    exclude-one rule, an immigration status, a demographic restriction) -
+    eligibility_note is what is left once that honest call has been made. It
+    is a distinct field, not folded into generic matching/freshness caveats,
+    so a frontend can render it as its own label rather than lose it inside
+    a caveats list meant for "this data needs re-verification" warnings."""
     scholarship = await _approved_scholarship(db)
     response = await client.post(
         f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
@@ -165,10 +167,12 @@ async def test_an_eligibility_note_surfaces_as_a_search_caveat(db, client) -> No
     assert response.status_code == 200, response.text
 
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
-    assert results[0]["caveats"] == ["Not open to UK nationals or home-fee-status students."]
+    assert results[0]["eligibility_note"] == "Not open to UK nationals or home-fee-status students."
+    assert results[0]["caveats"] == []
 
-    detail = await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")
-    assert "Not open to UK nationals or home-fee-status students." in detail.json()["caveats"]
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["eligibility_note"] == "Not open to UK nationals or home-fee-status students."
+    assert detail["caveats"] == []
 
 
 async def test_a_second_cycle_can_be_added_to_an_already_published_scholarship(db, client) -> None:

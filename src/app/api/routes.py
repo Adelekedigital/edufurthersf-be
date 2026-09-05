@@ -491,8 +491,6 @@ def _search_result(
     caveats = list(decision.caveats)
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
-    if facts.get("eligibility_note"):
-        caveats.append(facts["eligibility_note"])
     return SearchResult(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
@@ -503,6 +501,7 @@ def _search_result(
         award_type=row.scholarship.award_type if row.scholarship else "",
         status=status.value,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
+        eligibility_note=facts.get("eligibility_note"),
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -708,8 +707,6 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     caveats: list[str] = []
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
-    if facts.get("eligibility_note"):
-        caveats.append(facts["eligibility_note"])
     return ScholarshipDetailResponse(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
@@ -721,6 +718,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         official_url=row.official_cycle_url,
         facts=facts,
         last_verified_at=row.last_verified_at,
+        eligibility_note=facts.get("eligibility_note"),
         caveats=caveats,
     )
 
