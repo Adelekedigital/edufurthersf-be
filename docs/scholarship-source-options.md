@@ -86,3 +86,98 @@ choices" answer that was hoped for - it's what a real check actually found.
    for** (Tier C, candidate discovery only, per the verification
    standard) while the above are pursued - its 27% hit rate is a real
    yield, not zero, and nothing above replaces it outright yet.
+
+## Update, 2026-09-05: outcomes
+
+**DAAD** - landed. Registered as a `Source` (`authority_grade="A"`), 11 real
+programmes curated directly from `www2.daad.de`'s own database, verified,
+approved and published (`data_scripts/daad_pilot_batch.csv`). Confirmed live
+via real search queries against the deployed API.
+
+**Commonwealth Scholarship Commission (UK)** - landed the same way. Registered
+as a `Source` (`authority_grade="A"`), 3 real schemes verified directly from
+`cscuk.fcdo.gov.uk` and published (`data_scripts/csc_pilot_batch.csv`):
+Commonwealth PhD Scholarships (LDCs/vulnerable states, 17-country list),
+Commonwealth Shared Scholarships (44-country list), Commonwealth Master's
+Scholarships (43-country list - one country different from the Shared list,
+kept independently resolved rather than reused). Two other real CSC schemes
+(Professional/Academic Fellowships, Startup Fellowships) were deliberately
+excluded: neither is a degree programme, so neither fits the platform's
+masters/doctorate-only level taxonomy.
+
+**Parse.bot / ScholarshipPortal / PhDScanner** - the legitimacy question from
+above is now answered, not in the hoped-for direction: Parse.bot's own
+marketplace listings self-describe both as "an independent, maintained REST
+wrapper... not an official API from the source site." Both stay
+`authority_grade="C"`, the same tier as ScholarshipRegion - useful for
+discovery breadth, never evidence on their own. A real sample pull (not
+marketing claims) found ScholarshipPortal returns hits for all five
+destinations but with real cross-country leakage/duplicate noise; PhDScanner
+returns genuinely high-quality funded-PhD postings for `GB`/`DE`/`FI` but
+**zero results for `CA`/`US`** - a real gap, not a rounding error. A
+scheduled `harvest_parsebot` connector (weekly, both APIs, all five
+destinations, two independent kill switches) is built and quality-gate-clean
+(PR #15), not yet deployed.
+
+**Fulbright / EducationUSA** - researched, not landed; documented here rather
+than silently dropped. Two separate problems, not one:
+
+- *Structural*: the Foreign Student Program isn't one unified scheme the way
+  DAAD or CSC are. It's ~160 separate country programs, each administered
+  independently by a bi-national Fulbright Commission or US Embassy, each
+  with its own deadline and process. There is no single "Fulbright" page to
+  verify the way DAAD's or CSC's schemes have one - it would need to be
+  handled as N independently-verified per-country candidates, not one.
+- *Access*: every `*.usembassy.gov` page tried (Tunisia, Sierra Leone, Chad,
+  Kenya) returned a hard block (403 or connection reset) - a real,
+  consistent bot-mitigation wall, not a transient failure worth retrying or
+  routing around. `foreign.fulbrightonline.org` (the general hub) is
+  fetchable and confirms real facts - Master's/Doctorate levels, J-1 visa
+  sponsorship, health benefits, embassy-administered - but doesn't expose
+  concrete per-country deadlines in static-fetchable form (rendered
+  per-country dynamically).
+
+Net: enough confirmed to register Fulbright as a legitimate `Source`
+(`authority_grade="A"`) in the future, not enough independently-verified,
+dated facts to responsibly publish even one specific country's cycle today.
+Revisit if: (a) someone with normal browser access pastes a specific
+country's embassy-page content for verification, or (b) a non-embassy
+mirror of country-specific deadlines is found and independently confirmed.
+
+**Other candidates raised but not yet researched** (Mastercard Foundation,
+Chevening, Rhodes, McGill, and similar) - see the "Other direct-source
+candidates" note below for an initial scoping pass; none of these have been
+independently verified yet, so none should be treated as confirmed.
+
+## Other direct-source candidates (scoped, not yet verified)
+
+Quick structural assessment only - none of these have had a DAAD/CSC-style
+verification pass yet, so treat every claim below as unconfirmed until a real
+fetch backs it up:
+
+- **Chevening** (`chevening.org`) - looks like the best-shaped next
+  candidate: a single UK-government-funded scheme with one centralized
+  application site (unlike Fulbright), and scholarships.region data already
+  surfaced real Chevening listings this session, so it's a known-real award.
+  Likely has one global deadline and an enumerable eligible-country list, the
+  same shape DAAD and CSC had. Worth verifying next.
+- **Rhodes Scholarship** (`rhodeshouse.ox.ac.uk`) - centrally documented on
+  one site even though selection is split into regional "constituencies"
+  (unlike Fulbright's scattered embassy pages) - each constituency's
+  deadline/quota is listed on the same domain. Plausibly tractable, not yet
+  checked for bot-blocking the way `.usembassy.gov` was.
+- **Mastercard Foundation Scholars Program** - structurally different from
+  DAAD/CSC/Chevening/Rhodes: it's a funding *brand* that appears across many
+  independently-run university programmes (Cambridge, Edinburgh, CMU-Africa,
+  ASU, and others already seen as distinct listings in the ScholarshipRegion
+  data this session), not one unified scheme with its own application portal.
+  Registering "Mastercard Foundation" as a single `Source` the way DAAD is
+  one wouldn't be accurate - each university's own Mastercard-funded program
+  page would need its own verification pass, closer to how individual
+  ScholarshipRegion candidates already get verified than to a new Source.
+- **McGill University** - a single institution, not a national/foundation
+  body spanning many programmes the way DAAD/CSC are. Adding McGill-specific
+  scholarships is possible but is provider-level candidate verification (like
+  the University of Maine example earlier this session), not a new
+  direct-source integration - different scale of effort than this document
+  is about.
