@@ -367,6 +367,8 @@ dependencies = [
     { name = "email-validator" },
     { name = "fastapi", extra = ["standard"] },
     { name = "httpx" },
+    { name = "parse-apis" },
+    { name = "parse-sdk" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -393,6 +395,8 @@ requires-dist = [
     { name = "email-validator", specifier = ">=2.2,<3" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "parse-apis", editable = "parse_apis" },
+    { name = "parse-sdk", specifier = ">=0.2.0" },
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "pyjwt", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<3" },
@@ -963,6 +967,30 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412, upload-time = "2026-08-04T18:15:28.737Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956, upload-time = "2026-08-04T18:15:27.159Z" },
+]
+
+[[package]]
+name = "parse-apis"
+version = "0.0.0"
+source = { editable = "parse_apis" }
+dependencies = [
+    { name = "parse-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "parse-sdk", specifier = "==0.2.0" }]
+
+[[package]]
+name = "parse-sdk"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/28/f6/5fdc429f13e0c3f60e665ab6d29f566ae6ce2a7c4033d306d6309d24e05f/parse_sdk-0.2.0.tar.gz", hash = "sha256:8ce0f8dee9e4ae82897ace1ed38484f07ef3ba00c32ada5fdd2dca7cb87c8974", size = 206532, upload-time = "2026-07-16T22:08:52.565Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/66/3fc770f3aaff058cb5e9c635f0f25ec2e80a7f0400d2febdbef0c73b5090/parse_sdk-0.2.0-py3-none-any.whl", hash = "sha256:83e7d938cdd5a4f2f4a5c890b73a75dfa6c08619a8262a23d64acd9b08e1e330", size = 219267, upload-time = "2026-07-16T22:08:50.87Z" },
 ]
 
 [[package]]

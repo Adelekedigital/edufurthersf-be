@@ -346,6 +346,22 @@ def _parse_job(raw_body: bytes) -> JobRequest:
         raise HTTPException(status_code=422, detail="Invalid job payload") from exc
 
 
+#: Kinds a QStash *schedule* delivers on a recurring cadence with one static
+#: stored body. `ProcessingJob.dedupe_key` is permanently unique, so reusing
+#: whatever key that static body carries would let only the first-ever
+#: delivery actually run - every later delivery would just report that first
+#: job's now-stale result forever (see README's "replayed delivery... reports
+#: that job's current state without re-running it"). Recomputing a
+#: week-scoped key here, ignoring the delivered payload's own dedupe_key,
+#: keeps same-week retries idempotent while letting next week run for real.
+RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot"})
+
+
+def _weekly_dedupe_key(kind: str) -> str:
+    iso_year, iso_week, _ = datetime.now(UTC).isocalendar()
+    return f"{kind}:{iso_year}-W{iso_week:02d}"
+
+
 async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobResponse:
     """Enqueue a job, then run it before acknowledging the delivery.
 
@@ -367,7 +383,10 @@ async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobR
     """
     if kind not in ALLOWED_JOB_KINDS:
         raise HTTPException(status_code=404, detail="Unknown job kind")
-    job, created = await enqueue_job(db, kind, job_request.dedupe_key, job_request.payload)
+    dedupe_key = (
+        _weekly_dedupe_key(kind) if kind in RECURRING_WEEKLY_KINDS else job_request.dedupe_key
+    )
+    job, created = await enqueue_job(db, kind, dedupe_key, job_request.payload)
     now = datetime.now(UTC)
     eligible = job.state in (JobState.queued.value, JobState.retry_wait.value) and (
         job.next_attempt_at is None or job.next_attempt_at <= now

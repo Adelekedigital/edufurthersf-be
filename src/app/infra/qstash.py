@@ -154,5 +154,6 @@ ALLOWED_JOB_KINDS = frozenset(
         "dispatch_outbox",
         "reconcile_stuck_jobs",
         "sync_countries",
+        "harvest_parsebot",
     }
 )

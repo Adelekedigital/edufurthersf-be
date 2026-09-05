@@ -7,3 +7,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .coverage
+
+# Parse SDK: the generated client (parse_apis/) is committed, not gitignored,
+# because Railway builds from a git checkout with no network access to
+# Parse.bot or PARSE_API_KEY at build time - the default "regenerate per
+# developer" pattern would leave the deployed image with nothing to install.
+.parse/
