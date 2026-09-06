@@ -40,9 +40,14 @@ class Settings(BaseSettings):
     core_service_token: str | None = None
     core_allowed_return_url_prefix: str | None = None
     # The shared AI Router (LiteLLM + Langfuse) - a platform capability owned
-    # outside both Core and Finder, not yet provisioned as its own service.
+    # outside both Core and Finder. Auth is a short-lived RS256 JWT Finder
+    # signs in-process (docs/integration-scholarship-finder.md on the router
+    # side) - never a static bearer token, so this is a keypair, not a
+    # secret string handed to us. `ai_router_key_id` is the registered `kid`;
+    # bump it (and re-register) on every rotation, never reuse one.
     ai_router_base_url: str | None = None
-    ai_router_service_token: str | None = None
+    ai_router_private_key_pem: str | None = None
+    ai_router_key_id: str | None = None
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 

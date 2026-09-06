@@ -10,7 +10,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0,<3",
   "asyncpg>=0.30,<1",
   "alembic>=1.14,<2",
-  "PyJWT>=2.10,<3",
+  "PyJWT[crypto]>=2.10,<3",
   "httpx>=0.28,<1",
   "email-validator>=2.2,<3",
   # zoneinfo has no bundled IANA database on Windows, and python:3.14-slim

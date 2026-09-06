@@ -213,6 +213,13 @@ class Discovery(TimestampMixin, Base):
     # raw_title/raw_excerpt - never a verified fact, purely a reviewer head
     # start. Null until the extract_candidate job has run for this row.
     extracted_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # A separate, optional AI Router pass over the same raw text - kept apart
+    # from `extracted_facts` rather than merged into it, since the two have
+    # different provenance (regex vs. model) and the router "cannot set
+    # published or verified state": just as provisional as the regex facts,
+    # never more trusted for being newer or model-produced. Null whenever the
+    # router wasn't configured, didn't complete, or hasn't run yet.
+    ai_extracted_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # The prior discovery whose content this row revises. A changed re-crawl of
     # an already known URL creates a new row rather than overwriting the old
     # one, so a decision made from the earlier content stays explainable.
