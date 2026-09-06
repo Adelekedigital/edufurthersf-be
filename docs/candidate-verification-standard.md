@@ -61,6 +61,20 @@ best-effort publish.
    supported (`CA`, `GB`, `US`, `DE`, `FI`); an Erasmus Mundus-style
    multi-country consortium only counts if the applicant's actual study
    country is *guaranteed* to be one of those five, not merely possible.
+   **Field tagging is now a required publish-time step, not an afterthought**
+   (the [50-profile test](coverage-test-50-profile-2026-09-05.md) found 97/99
+   published records left at `field_mode="unknown"`, which is exactly the
+   silent default a skipped step produces):
+   - `field_mode="restricted"` with the specific narrow ISCED-F code(s) when
+     the source names an actual subject/discipline (a programme title like
+     "MSc Development Economics" or "Doctoral scholarships in Aerospace
+     Engineering" is itself sufficient evidence - no separate re-fetch
+     needed beyond what auto-publish already required).
+   - `field_mode="all"` when the source states the award is open to any
+     discipline (common for large general merit schemes - Chevening,
+     Commonwealth, Rhodes-style awards typically say this explicitly).
+   - `field_mode="unknown"` only when the source genuinely doesn't say -
+     never as a default taken because tagging felt optional.
 5. **`origin_mode` chosen honestly, with `eligibility_note` for what it
    can't represent.** `restricted` only with a real, independently-resolved
    enumerable list (never guessed from memory - see "Country-list

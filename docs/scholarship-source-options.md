@@ -149,6 +149,41 @@ Chevening, Rhodes, McGill, and similar) - see the "Other direct-source
 candidates" note below for an initial scoping pass; none of these have been
 independently verified yet, so none should be treated as confirmed.
 
+**Finland-doctorate / Canada-federal** (2026-09-05) - researched per the
+[50-profile coverage test](coverage-test-50-profile-2026-09-05.md)'s
+recommendation to prioritize these over more GB volume; **not pursued
+further, documented rather than silently dropped**:
+
+- *Finland*: the gap is structural, not a sourcing failure. Aalto
+  University's own funding page (fetched directly) states doctoral funding
+  is "employment-based... work contract(s) as an employed doctoral
+  researcher," not a scholarship - named third-party grants that do exist
+  (Kordelin, Wihuri) are broad Finnish foundations, not international-student
+  targeted schemes. EDUFI Fellowships, the one centralized government award
+  that did fit the "scholarship" shape, was discontinued in October 2025
+  (page now 404s). Finland doctoral funding maps onto paid employment
+  (`award_type="assistantship"`), not a recurring named scheme - a
+  fundamentally different, much higher-churn sourcing pattern (one-off
+  Euraxess.fi/department postings, not a stable page to verify against).
+- *Canada*: the federal layer is likely already consolidated into CGRS-D
+  (already landed). Vanier Canada Graduate Scholarships - the obvious next
+  federal candidate - is itself discontinued: UBC's grad-school page states
+  plainly it was "merged into the Canada Graduate Research Scholarship –
+  Doctoral (CGRS-D) program as part of a tri-agency funding harmonization
+  initiative," the same wave that likely absorbed the other legacy federal
+  awards (Banting/Best, Bell, Bombardier CGS - not independently confirmed).
+  Registering Vanier would have been a duplicate of an already-superseded
+  program, the same trap as the CGRS-D duplicate resolved earlier this
+  session. Remaining Canada depth is at the university/foundation level,
+  where the catalogue already has reasonable coverage (UBC x2, Alberta,
+  McGill, Killam, Trudeau, Arrell).
+
+Net: no new `Source` registered for either gap. Revisit Finland only if the
+product decides to source assistantship-style postings (a different pattern
+entirely, not a scope decision to make lightly); revisit Canada only if a
+genuinely new university/foundation candidate surfaces, not by re-checking
+the now-defunct federal schemes.
+
 ## Other direct-source candidates (scoped, not yet verified)
 
 Quick structural assessment only - none of these have had a DAAD/CSC-style
