@@ -12,7 +12,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.detail_schemas import ScholarshipDetailResponse
+from app.api.detail_schemas import MatchProfileRequest, ScholarshipDetailResponse
 from app.api.ingestion_schemas import FeedImportRequest, FeedImportResponse
 from app.api.job_schemas import JobRequest, JobResponse
 from app.api.join_schemas import JoinIntentRequest, JoinIntentResponse
@@ -74,6 +74,7 @@ from app.infra.countries import load_vocabulary
 from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import count_due_jobs, due_jobs, enqueue_job
+from app.infra.match_explanations import get_match_explanation
 from app.infra.outbox import enqueue_analytics_event
 from app.infra.providers import create_provider, list_providers
 from app.infra.publication import publish_cycle
@@ -1049,7 +1050,7 @@ async def search(
     )
 
 
-async def _scholarship_detail(identifier: str, db: AsyncSession) -> ScholarshipDetailResponse:
+async def _fetch_published_cycle_row(identifier: str, db: AsyncSession) -> ScholarshipCycle | None:
     try:
         scholarship_id = uuid.UUID(identifier)
         predicate = ScholarshipCycle.scholarship_id == scholarship_id
@@ -1065,10 +1066,12 @@ async def _scholarship_detail(identifier: str, db: AsyncSession) -> ScholarshipD
         .options(selectinload(ScholarshipCycle.scholarship).selectinload(Scholarship.provider))
         .limit(1)
     )
-    row = result.scalars().first()
-    if row is None:
-        from fastapi import HTTPException
+    return result.scalars().first()
 
+
+async def _scholarship_detail(identifier: str, db: AsyncSession) -> ScholarshipDetailResponse:
+    row = await _fetch_published_cycle_row(identifier, db)
+    if row is None:
         raise HTTPException(status_code=404, detail="Scholarship not found")
     return _detail(row)
 
@@ -1078,6 +1081,72 @@ async def scholarship_detail(
     identifier: str, db: AsyncSession = Depends(get_db)
 ) -> ScholarshipDetailResponse:
     return await _scholarship_detail(identifier, db)
+
+
+match_explanation_limiter = InMemoryRateLimiter()
+#: A cache miss is a real paid AI Router call, unlike a free DB search - a
+#: much tighter cap than search's is deliberate, not an oversight.
+MATCH_EXPLANATION_PER_MINUTE = 10
+
+
+@router.post("/scholarships/{identifier}", response_model=ScholarshipDetailResponse)
+async def scholarship_detail_with_explanation(
+    identifier: str,
+    payload: MatchProfileRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ScholarshipDetailResponse:
+    """Same detail as `GET`, plus a `match_explanation` for this searcher's
+    profile against this one scholarship - never the other way around, so a
+    bare shared link (`GET`, no profile) stays free of any AI Router call.
+
+    The explanation elaborates on the deterministic match decision
+    (`evaluate_match`'s `fit`/`reason_codes`/`caveats`) rather than
+    re-deriving one - per the automation boundary, AI explains a match, it
+    never computes one. A profile that doesn't deterministically match this
+    cycle at all (wrong level, ineligible origin, wrong field) gets the
+    plain detail response with no explanation - there's nothing true to
+    explain about a non-match, so nothing is asked of the router.
+    """
+    limiter_key = request.client.host if request.client else "unknown"
+    if not match_explanation_limiter.allow(limiter_key, MATCH_EXPLANATION_PER_MINUTE):
+        raise HTTPException(
+            status_code=429,
+            detail="Match-explanation rate limit exceeded",
+            headers={"Retry-After": "60"},
+        )
+    row = await _fetch_published_cycle_row(identifier, db)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Scholarship not found")
+    detail = _detail(row)
+    facts = row.facts or {}
+    countries = await load_vocabulary(db)
+    try:
+        origin = countries.origin(payload.origin_country)
+        degree = TAXONOMY.degree(payload.program_level)
+        accepted_fields = (
+            TAXONOMY.narrow_fields_under(TAXONOMY.broad_field(payload.field))
+            if payload.field
+            else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    profile = SearchProfile(
+        origin, frozenset(facts.get("destinations", [])), degree, accepted_fields
+    )
+    decision = evaluate_match(profile, facts)
+    if decision is None:
+        return detail
+    detail.match_explanation = await get_match_explanation(
+        db,
+        cycle=row,
+        facts=facts,
+        origin_country=origin,
+        program_level=degree,
+        field=payload.field,
+        decision=decision,
+    )
+    return detail
 
 
 async def database_ready(db: AsyncSession) -> bool:
