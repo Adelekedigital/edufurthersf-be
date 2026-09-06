@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     ai_router_base_url: str | None = None
     ai_router_private_key_pem: str | None = None
     ai_router_key_id: str | None = None
+    # Off until reviewed and explicitly turned on - a working keypair alone
+    # must not be enough to put a live AI-generated explanation in front of
+    # a real searcher.
+    match_explanation_enabled: bool = False
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 

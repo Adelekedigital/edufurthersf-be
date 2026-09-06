@@ -30,6 +30,12 @@ from app.infra.sessions import filter_digest
 
 logger = logging.getLogger("app.infra.match_explanations")
 
+#: This runs synchronously inside a user-facing request on a cache miss -
+#: the router's default (DEFAULT_TIMEOUT_SECONDS, 45s) is a background-job
+#: budget, not something to make a page wait on. A miss that blows this
+#: bound still degrades to "no explanation," same as any other failure.
+MATCH_EXPLANATION_TIMEOUT_SECONDS = 10.0
+
 
 async def _cached(
     db: AsyncSession, *, cycle_id: uuid.UUID, profile_digest: str, facts_digest: str
@@ -93,7 +99,8 @@ async def get_match_explanation(
 
     settings = get_settings()
     if not (
-        settings.ai_router_base_url
+        settings.match_explanation_enabled
+        and settings.ai_router_base_url
         and settings.ai_router_private_key_pem
         and settings.ai_router_key_id
     ):
@@ -103,6 +110,7 @@ async def get_match_explanation(
         base_url=settings.ai_router_base_url,
         private_key_pem=settings.ai_router_private_key_pem,
         key_id=settings.ai_router_key_id,
+        timeout_seconds=MATCH_EXPLANATION_TIMEOUT_SECONDS,
     )
     request = AIRouterRequest(
         task=AITask.match_explanation,

@@ -170,6 +170,20 @@ just came from a `/search` submission) and want the explanation - it has its
 own, tighter rate limit than search (a cache miss is a real paid call, not a
 free DB query), so don't call it speculatively for every card in a list.
 
+**Recommended loading pattern for the detail page**: call `GET` first and
+render the scholarship's details immediately - it's always fast, never
+touches the AI Router. Call `POST` in parallel (or right after) purely to
+fill in `match_explanation`, and show a loading state for *just that
+section* while it resolves, since a cache miss makes a real synchronous AI
+call (bounded to 10s server-side, then it gives up and returns `null` rather
+than hanging). Don't block the whole page on `POST` - the explanation is a
+nice-to-have addition to a page that already has everything else it needs
+from `GET`.
+
+**Currently behind a feature flag, off by default** (`match_explanation`
+will always be `null` from `POST` until the team turns it on) - don't build
+against it landing "any day"; there's no ETA yet.
+
 ## Errors
 
 Every 4xx/5xx is `application/problem+json` (RFC7807):
