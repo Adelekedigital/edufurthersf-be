@@ -533,6 +533,7 @@ def _search_result(
         status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=facts.get("eligibility_note"),
+        field_names=facts.get("field_names", []),
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -662,6 +663,7 @@ async def publish(
             deadline_timezone=payload.deadline_timezone,
             eligibility_note=payload.eligibility_note,
             expected_reopen_month=payload.expected_reopen_month,
+            field_names=payload.field_names,
             countries=countries,
         )
     except ValueError as exc:
@@ -768,6 +770,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         facts=facts,
         last_verified_at=row.last_verified_at,
         eligibility_note=facts.get("eligibility_note"),
+        field_names=facts.get("field_names", []),
         caveats=caveats,
     )
 

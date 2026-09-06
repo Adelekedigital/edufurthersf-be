@@ -61,6 +61,12 @@ class SearchResult(BaseModel):
     #: it as its own label, not lost inside generic matching/freshness
     #: caveats.
     eligibility_note: str | None = None
+    #: The source's own course/subject wording ("MSc Development Economics"),
+    #: alongside (never instead of) the normalised ISCED-F `fields` codes
+    #: used for matching - a distinct field for the same reason as
+    #: `eligibility_note`: a frontend shouldn't need to parse `facts` to show
+    #: the specific programme name.
+    field_names: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
 
 

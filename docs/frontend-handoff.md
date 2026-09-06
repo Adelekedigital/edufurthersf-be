@@ -23,6 +23,12 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    broad codes for search, 29 narrow codes used only for tagging) - see
    "Fields" below. Practically: expect `field` to now be a real dropdown of
    11 options, not a binary choice.
+5. **`field_names` is new** on every search result and the detail response -
+   the source's own course/subject wording ("MSc Development Economics"),
+   verbatim, alongside the normalised broad/narrow codes. Use it to show the
+   *specific* programme name; the `field` codes are for filtering, not for
+   display copy. Empty for most records today (only just started being
+   populated at publish time).
 
 ## `GET /taxonomies`
 
@@ -72,6 +78,7 @@ page) but isn't itself a valid `field` search value.
       "official_url": "https://...",
       "last_verified_at": "2026-08-01T00:00:00Z",
       "eligibility_note": "Not open to UK nationals.", // present only for a restriction the schema can't otherwise represent
+      "field_names": ["MSc Development Economics"], // source's own wording, for display - not a filter value
       "caveats": ["Some eligibility conditions need checking."]
     }
   ],

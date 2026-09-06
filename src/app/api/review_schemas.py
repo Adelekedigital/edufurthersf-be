@@ -112,6 +112,10 @@ class PublishCycleRequest(BaseModel):
     origins: list[str] = Field(default_factory=list, max_length=250)
     field_mode: Literal["restricted", "all", "unknown"] = "unknown"
     fields: list[str] = Field(default_factory=list, max_length=50)
+    #: The source's own course/subject wording ("MSc Development Economics"),
+    #: kept verbatim alongside the normalised `fields` codes - never
+    #: validated against the taxonomy, since it is a quote, not a code.
+    field_names: list[str] = Field(default_factory=list, max_length=20)
     #: Whether the evidence behind this cycle is current, per the reviewer's
     #: own judgement — not derived from anything else in this request.
     evidence_fresh: bool = False

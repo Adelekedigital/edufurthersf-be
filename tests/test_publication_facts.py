@@ -72,3 +72,17 @@ def test_no_expected_reopen_month_means_no_key_at_all() -> None:
     here, never a default."""
     facts = _facts()
     assert "expected_reopen_month" not in facts
+
+
+def test_field_names_are_stored_verbatim_deduped_and_sorted() -> None:
+    facts = _facts(field_names=["Mathematics", "mathematics", "Mathematics", "Statistics"])
+    assert facts["field_names"] == ["Mathematics", "Statistics", "mathematics"]
+
+
+def test_no_field_names_means_no_key_at_all() -> None:
+    """Same honesty rule as eligibility_note/expected_reopen_month - absent
+    when nothing was actually given, never an empty list stored anyway."""
+    facts = _facts()
+    assert "field_names" not in facts
+    assert _facts(field_names=[])
+    assert "field_names" not in _facts(field_names=["", "  "])
