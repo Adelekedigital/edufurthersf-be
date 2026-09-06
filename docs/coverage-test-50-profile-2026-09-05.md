@@ -103,3 +103,17 @@ it doesn't touch the stale-tag question.
 5. **Origin-varies-per-cell is the wrong design for isolating field effects**
    specifically (it was fine for the original destination/level coverage
    question). A future field-focused test should hold origin fixed.
+
+## Update, 2026-09-06: the data-tagging gap from point 2 is substantially closed
+
+A backfill pass (`backfill_field_tags.py`) went through the 72 `"unknown"`
+records and tagged 35 where the field was genuinely evident - either stated
+directly in the record's own title (13 records, e.g. "Hodgson **Law**
+Scholarship" -> `law`) or a well-documented public fact about the named
+program (22 records, e.g. Studienstiftung/Killam/Mastercard Foundation
+Scholars are all known to be open to any discipline -> `field_mode="all"`).
+New distribution: **24 `restricted`, 38 `all`, 37 `unknown`** (was 2/25/72).
+Field-based search now meaningfully differentiates results for about
+two-thirds of the catalog, not ~2% of it. The remaining 37 stay `unknown`
+deliberately - no confident evidence either way, per the "no
+taxonomy-forcing" rule, not an oversight.
