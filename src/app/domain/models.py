@@ -481,3 +481,26 @@ class AuditLog(TimestampMixin, Base):
     action: Mapped[str] = mapped_column(String(100))
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MatchExplanation(TimestampMixin, Base):
+    """A cached AI Router match_explanation result for one (cycle, searcher
+    profile) pair - populated on first request, from day one rather than
+    added once cost became a problem.
+
+    `facts_digest` pins the cache to the exact cycle facts it was generated
+    against: a republish that changes funding/deadline/eligibility must not
+    keep serving an explanation that quietly no longer matches what the
+    scholarship actually says, so a facts change is a cache miss, not a
+    stale hit.
+    """
+
+    __tablename__ = "match_explanations"
+    __table_args__ = (UniqueConstraint("cycle_id", "profile_digest"),)
+    explanation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    cycle_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scholarship_cycles.cycle_id"))
+    profile_digest: Mapped[str] = mapped_column(String(64))
+    facts_digest: Mapped[str] = mapped_column(String(64))
+    explanation: Mapped[str] = mapped_column(Text)

@@ -29,6 +29,9 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    *specific* programme name; the `field` codes are for filtering, not for
    display copy. Empty for most records today (only just started being
    populated at publish time).
+6. **`POST /scholarships/{identifier}` is new** (`GET` still exists,
+   unchanged) - same detail response, plus an AI-generated
+   `match_explanation` when you send the searcher's profile. See below.
 
 ## `GET /taxonomies`
 
@@ -135,6 +138,37 @@ A fresh search (no `cursor`) always starts a new `search_id`; pass
 `next_cursor` back as `cursor` for the next page of the *same* search - don't
 resubmit the original filters as a new search per page, since that would
 count as a new search event.
+
+## `GET` / `POST /scholarships/{identifier}`
+
+Same URL, same `ScholarshipDetailResponse` shape either way - the method is
+what decides whether a personalised AI explanation gets generated.
+
+- **`GET`** - no body, no AI Router call, ever. Use this for a bare/shared
+  link, SEO, or anywhere you don't have the searcher's profile handy.
+  `match_explanation` is always `null`.
+- **`POST`** - body is the searcher's profile:
+  ```jsonc
+  { "origin_country": "NG", "program_level": "masters", "field": "ict" }
+  ```
+  (`field` optional, same broad code as `/search`; no `target_countries` -
+  the destination is already fixed by whichever scholarship this is.) If the
+  profile is a genuine deterministic match for this scholarship (same rules
+  `/search` uses), the response includes:
+  ```jsonc
+  "match_explanation": "This scholarship suits your profile because ..."
+  ```
+  If the profile *isn't* a match at all (wrong degree level, ineligible
+  origin, wrong field), `match_explanation` stays `null` - there's nothing
+  true to explain about a non-match, so no AI call is even attempted. It can
+  also be `null` when it *is* a match but the AI Router is temporarily
+  unavailable - treat an absent explanation as "not available right now,"
+  never as a sign the scholarship doesn't fit.
+
+Call `POST` only when you actually have profile context (e.g. the searcher
+just came from a `/search` submission) and want the explanation - it has its
+own, tighter rate limit than search (a cache miss is a real paid call, not a
+free DB query), so don't call it speculatively for every card in a list.
 
 ## Errors
 
