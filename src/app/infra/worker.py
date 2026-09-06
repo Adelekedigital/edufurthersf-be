@@ -5,12 +5,14 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Literal
 
+import httpx
 from pydantic import HttpUrl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ingestion_schemas import FeedRecord
 from app.core.config import get_settings
+from app.domain.ai_router import AIRouterOutcome, AIRouterRequest, AITask
 from app.domain.countries import SUPPORTED_DESTINATIONS
 from app.domain.extraction import extract_candidate_facts
 from app.domain.models import Discovery, ReviewTask, Source
@@ -23,6 +25,7 @@ from app.domain.parsebot_harvest import (
     scholarship_to_record,
 )
 from app.domain.review_draft import draft_review_recommendation
+from app.infra.ai_router_client import AIRouterClient
 from app.infra.core_catalogue import CoreCatalogueClient
 from app.infra.countries import load_vocabulary, sync_countries
 from app.infra.ingestion import import_feed_records
@@ -95,6 +98,10 @@ async def _sync_countries(db: AsyncSession) -> None:
     await sync_countries(db, CoreCatalogueClient(settings.core_base_url))
 
 
+#: The Router's documented cap on `source_data` once serialized.
+AI_ROUTER_SOURCE_DATA_MAX_BYTES = 16 * 1024
+
+
 async def _extract_candidate(db: AsyncSession, payload: dict) -> None:
     discovery = await db.scalar(
         select(Discovery)
@@ -104,7 +111,55 @@ async def _extract_candidate(db: AsyncSession, payload: dict) -> None:
     if discovery is None:
         raise LookupError("Discovery not found")
     discovery.extracted_facts = extract_candidate_facts(discovery.raw_title, discovery.raw_excerpt)
+    discovery.ai_extracted_facts = await _try_ai_extraction(discovery)
     await db.commit()
+
+
+async def _try_ai_extraction(discovery: Discovery) -> dict | None:
+    """A best-effort AI Router pass, layered on top of the deterministic
+    extraction above - never required for extract_candidate to succeed.
+    Unconfigured, a non-`completed` outcome, or a transport failure all just
+    mean no AI-assisted facts this time, same as if the router did not
+    exist; extract_candidate must never fail because of it.
+    """
+    settings = get_settings()
+    if not (
+        settings.ai_router_base_url
+        and settings.ai_router_private_key_pem
+        and settings.ai_router_key_id
+    ):
+        return None
+    excerpt = discovery.raw_excerpt or ""
+    if len(excerpt.encode()) > AI_ROUTER_SOURCE_DATA_MAX_BYTES:
+        excerpt = excerpt.encode()[:AI_ROUTER_SOURCE_DATA_MAX_BYTES].decode(errors="ignore")
+    client = AIRouterClient(
+        base_url=settings.ai_router_base_url,
+        private_key_pem=settings.ai_router_private_key_pem,
+        key_id=settings.ai_router_key_id,
+    )
+    request = AIRouterRequest(
+        task=AITask.scholarship_extraction,
+        task_version="v1",
+        schema_version=1,
+        product_id="scholarship_finder",
+        feature_id="extract_candidate",
+        correlation_id=str(discovery.discovery_id),
+        # Deterministic per discovery, not random per attempt - a retried
+        # extract_candidate job must not double-spend the shared budget.
+        idempotency_key=f"extract_candidate:{discovery.discovery_id}",
+        source_data={"raw_title": discovery.raw_title, "raw_excerpt": excerpt},
+    )
+    try:
+        response = await client.execute(request)
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning(
+            "ai_router_extraction_failed",
+            extra={"discovery_id": str(discovery.discovery_id), "error": str(exc)},
+        )
+        return None
+    if response.outcome != AIRouterOutcome.completed:
+        return None
+    return response.output
 
 
 async def _prepare_review(db: AsyncSession, payload: dict) -> None:
