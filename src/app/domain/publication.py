@@ -30,6 +30,7 @@ def build_cycle_facts(
     deadline_timezone: str | None = None,
     eligibility_note: str | None = None,
     expected_reopen_month: int | None = None,
+    field_names: list[str] | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
     """Return the validated, normalised `facts` JSONB for a ScholarshipCycle.
@@ -47,6 +48,11 @@ def build_cycle_facts(
     yet enumerated. It is never a substitute for `origin_mode`/`origins` when
     those can honestly capture the restriction; it is what is left when they
     cannot, so the restriction is still visible rather than silently dropped.
+
+    `field_names` is the same kind of escape hatch for `fields`: the source's
+    own course/subject wording ("MSc Development Economics"), kept verbatim
+    rather than only the ISCED-F bucket it was classified into - never
+    validated against the taxonomy, since it is a quote, not a code.
     """
     normalized_destinations = sorted({countries.destination(value) for value in destinations})
     if not normalized_destinations:
@@ -83,6 +89,9 @@ def build_cycle_facts(
         facts["eligibility_note"] = eligibility_note
     if expected_reopen_month is not None:
         facts["expected_reopen_month"] = expected_reopen_month
+    normalized_field_names = sorted({name.strip() for name in (field_names or []) if name.strip()})
+    if normalized_field_names:
+        facts["field_names"] = normalized_field_names
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()
         facts["deadline_precision"] = deadline_precision
