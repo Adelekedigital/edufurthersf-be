@@ -40,6 +40,7 @@ class _FakeSettings:
     ai_router_base_url: str | None
     ai_router_private_key_pem: str | None
     ai_router_key_id: str | None
+    match_explanation_enabled: bool = True
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +89,29 @@ async def test_post_without_ai_router_configured_returns_no_explanation(db, clie
     response = await client.post(
         f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE
     )
+    assert response.status_code == 200, response.text
+    assert response.json()["match_explanation"] is None
+
+
+async def test_feature_flag_off_returns_no_explanation_even_when_fully_configured(
+    db, client, monkeypatch
+) -> None:
+    """A working keypair alone must not be enough to go live - off until
+    explicitly turned on is the whole point of the flag."""
+    cycle = await _publish(db)
+    monkeypatch.setattr(
+        match_explanations_module,
+        "get_settings",
+        lambda: _FakeSettings(
+            "https://router.test", "fake-pem", "kid-1", match_explanation_enabled=False
+        ),
+    )
+
+    async def _fake_execute(self, request):
+        raise AssertionError("must not be called while the feature flag is off")
+
+    monkeypatch.setattr(match_explanations_module.AIRouterClient, "execute", _fake_execute)
+    response = await client.post(f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE)
     assert response.status_code == 200, response.text
     assert response.json()["match_explanation"] is None
 
