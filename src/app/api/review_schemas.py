@@ -143,6 +143,11 @@ class PublishCycleRequest(BaseModel):
     #: left unset when no such evidence exists, same honesty rule as
     #: `origin_mode`/`eligibility_note`.
     expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
+    #: How much of the cost this award covers - distinct from `award_type`
+    #: (what kind of instrument it is; a scholarship or fellowship can each
+    #: be fully-funded or partial). One of GET /taxonomies `funding_types`.
+    #: Same honesty rule as `eligibility_note`: only set with real evidence.
+    funding_type: str | None = Field(default=None, max_length=30)
 
 
 class PublishCycleResponse(BaseModel):

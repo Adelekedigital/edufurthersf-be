@@ -37,6 +37,10 @@ class ScholarshipDetailResponse(BaseModel):
     #: See `SearchResult.destinations` - this award's own destination
     #: code(s), not to be inferred from a search filter.
     destinations: list[str] = Field(default_factory=list)
+    #: See `SearchResult.funding_type`.
+    funding_type: str | None = None
+    #: See `SearchResult.provider_country`.
+    provider_country: str | None = None
     caveats: list[str] = Field(default_factory=list)
     #: AI Router elaboration on this searcher's deterministic match decision
     #: - only ever set by `POST` with a profile; a bare `GET` (no profile,

@@ -30,6 +30,11 @@ class Taxonomy:
     broad_aliases: dict[str, str]
     degree_aliases: dict[str, str]
     award_types: dict[str, str]
+    #: How much of the cost an award covers - distinct from `award_types`
+    #: (what kind of instrument it is: scholarship/fellowship/grant/...).
+    #: The two vary independently: a scholarship and a fellowship can each
+    #: be fully-funded or partial.
+    funding_types: dict[str, str]
 
     def country(self, value: str) -> str:
         code = value.strip().upper()
@@ -69,6 +74,12 @@ class Taxonomy:
         code = value.strip().lower()
         if code not in self.award_types:
             raise ValueError("Unsupported award type")
+        return code
+
+    def funding_type(self, value: str) -> str:
+        code = value.strip().lower()
+        if code not in self.funding_types:
+            raise ValueError("Unsupported funding type")
         return code
 
 
@@ -194,6 +205,12 @@ TAXONOMY = Taxonomy(
         "assistantship": "Assistantship",
         "studentship": "Studentship",
         "grant": "Grant",
+    },
+    funding_types={
+        "fully_funded": "Fully funded",
+        "partial_funding": "Partial funding",
+        "tuition_only": "Tuition only",
+        "stipend_only": "Stipend only",
     },
 )
 

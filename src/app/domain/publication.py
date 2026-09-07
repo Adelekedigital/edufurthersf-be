@@ -31,6 +31,7 @@ def build_cycle_facts(
     eligibility_note: str | None = None,
     expected_reopen_month: int | None = None,
     field_names: list[str] | None = None,
+    funding_type: str | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
     """Return the validated, normalised `facts` JSONB for a ScholarshipCycle.
@@ -53,6 +54,11 @@ def build_cycle_facts(
     own course/subject wording ("MSc Development Economics"), kept verbatim
     rather than only the ISCED-F bucket it was classified into - never
     validated against the taxonomy, since it is a quote, not a code.
+
+    `funding_type` is how much of the cost is covered - distinct from
+    `award_types` (what kind of instrument this is). Optional, same honesty
+    rule as `eligibility_note`/`expected_reopen_month`: only set it when the
+    reviewer has real evidence of coverage, never a default guess.
     """
     normalized_destinations = sorted({countries.destination(value) for value in destinations})
     if not normalized_destinations:
@@ -92,6 +98,8 @@ def build_cycle_facts(
     normalized_field_names = sorted({name.strip() for name in (field_names or []) if name.strip()})
     if normalized_field_names:
         facts["field_names"] = normalized_field_names
+    if funding_type is not None:
+        facts["funding_type"] = TAXONOMY.funding_type(funding_type)
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()
         facts["deadline_precision"] = deadline_precision

@@ -46,3 +46,35 @@ async def test_at_least_one_domain_is_required(client) -> None:
         headers=AUTH,
     )
     assert response.status_code == 422
+
+
+async def test_country_is_optional_and_absent_by_default(client) -> None:
+    created = await client.post(
+        "/api/v1/internal/admin/providers", json=VALID_PROVIDER, headers=AUTH
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["country"] is None
+
+
+async def test_a_providers_own_country_is_stored_and_returned(client) -> None:
+    """Any real country, not limited to Finder's covered destinations - a
+    provider can be based anywhere, same vocabulary as a searcher's origin."""
+    created = await client.post(
+        "/api/v1/internal/admin/providers",
+        json={**VALID_PROVIDER, "country": "GB"},
+        headers=AUTH,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["country"] == "GB"
+
+    listed = await client.get("/api/v1/internal/admin/providers", headers=AUTH)
+    assert listed.json()["data"][0]["country"] == "GB"
+
+
+async def test_an_unrecognized_provider_country_is_a_422(client) -> None:
+    response = await client.post(
+        "/api/v1/internal/admin/providers",
+        json={**VALID_PROVIDER, "country": "ZZ"},
+        headers=AUTH,
+    )
+    assert response.status_code == 422

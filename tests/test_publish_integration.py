@@ -33,9 +33,13 @@ SEARCH = {
 }
 
 
-async def _approved_scholarship(db, *, slug: str = "award-a") -> Scholarship:
+async def _approved_scholarship(
+    db, *, slug: str = "award-a", provider_country: str | None = None
+) -> Scholarship:
     """A record at exactly the state decide_review leaves it: approved, unpublished."""
-    provider = Provider(name="Example University", approved_domains=["example.test"])
+    provider = Provider(
+        name="Example University", approved_domains=["example.test"], country=provider_country
+    )
     db.add(provider)
     await db.flush()
     scholarship = Scholarship(
@@ -275,6 +279,73 @@ async def test_search_result_exposes_expected_reopen_month_not_a_deadline(db, cl
     assert result["expected_reopen_month"] == 2
     assert result["deadline_at"] is None
     assert result["deadline_precision"] is None
+
+
+async def test_funding_type_is_distinct_from_award_type(db, client) -> None:
+    """award_type is what kind of instrument this is (scholarship/grant/...);
+    funding_type is how much of the cost it covers - the two vary
+    independently, so neither substitutes for the other."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "funding_type": "fully_funded"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["funding_type"] == "fully_funded"
+    assert result["award_type"] == "scholarship"
+
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["funding_type"] == "fully_funded"
+
+
+async def test_an_unsupported_funding_type_is_a_422(db, client) -> None:
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "funding_type": "not_a_real_funding_type"},
+        headers=AUTH,
+    )
+    assert response.status_code == 422
+
+
+async def test_funding_type_is_optional_and_absent_by_default(db, client) -> None:
+    """No taxonomy-forcing: a cycle published without funding evidence
+    reports null, never a guessed default."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["funding_type"] is None
+
+
+async def test_provider_country_is_the_providers_own_fact_not_the_study_destination(
+    db, client
+) -> None:
+    """A UK-based foundation funding study in Canada should show provider
+    "GB" alongside destinations ["CA"] - the two are unrelated facts, and
+    neither substitutes for the other."""
+    scholarship = await _approved_scholarship(db, provider_country="GB")
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["provider_country"] == "GB"
+    assert result["destinations"] == ["CA"]
+
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["provider_country"] == "GB"
 
 
 async def test_a_second_cycle_can_be_added_to_an_already_published_scholarship(db, client) -> None:

@@ -42,11 +42,16 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    `expected_reopen_month` are new** on every search result - all four were
    already computed server-side for `status`/`status_detail` but never
    returned, so a card had no way to show an actual deadline date or degree
-   badge without parsing `status_detail` copy. Two requested fields are
-   **not** included: `funding_type` and `provider_country` don't exist
-   anywhere in the data model yet (no taxonomy, no `Provider.country`
-   column) - see "Not yet available" below rather than assuming they're
-   coming in the next handoff.
+   badge without parsing `status_detail` copy.
+9. **`funding_type` and `provider_country` are new** - both required real
+   backend work, not just a schema tweak (a new taxonomy for the former, a
+   new `Provider.country` column for the latter), so they landed a beat
+   after the rest of the design-card fields. See "Funding type" and
+   "Provider country" below - in particular, don't confuse `funding_type`
+   with `award_type` (already existed), and don't confuse `provider_country`
+   with `destinations` (the award's own study country) - they answer
+   different questions and can legitimately differ on the same award (a
+   UK-based foundation funding study in Canada).
 
 ## `GET /taxonomies`
 
@@ -60,7 +65,8 @@ The vocabularies a search form is built from:
   "degrees": [{ "code": "masters", "label": "Master's" }, { "code": "doctorate", "label": "PhD" }],
   "fields": [{ "code": "ict", "label": "Information and Communication Technologies (ICT)" }, ...], // 11 broad codes - use this for the search filter
   "narrow_fields": [{ "code": "health", "label": "Health" }, ...], // 29 codes, not a search filter - reference only
-  "award_types": [{ "code": "scholarship", "label": "Scholarship" }, ...]
+  "award_types": [{ "code": "scholarship", "label": "Scholarship" }, ...], // what kind of instrument
+  "funding_types": [{ "code": "fully_funded", "label": "Fully funded" }, ...] // how much of the cost is covered - see "Funding type" below
 }
 ```
 
@@ -116,6 +122,8 @@ back to the full vocabulary when populated.
       "deadline_precision": "date", // "date" | "datetime" | null (null iff deadline_at is null) - "date" means don't render a time of day
       "degree_levels": ["masters"], // GET /taxonomies `degrees` codes this cycle accepts
       "expected_reopen_month": null, // 1-12, cyclic - never a year. Only meaningful with status "expected_to_reopen"
+      "funding_type": "fully_funded", // one of GET /taxonomies `funding_types`, or null - see "Funding type" below
+      "provider_country": "GB", // where the *provider* is based, or null - see "Provider country" below. NOT the study destination
       "caveats": ["Some eligibility conditions need checking."]
     }
   ],
@@ -166,16 +174,30 @@ for the search form.
   don't render one. Only meaningful when `status` is `"expected_to_reopen"`;
   null otherwise.
 
-### Not yet available: `funding_type`, `provider_country`
+### Funding type
 
-Neither exists anywhere in the backend today - not a display gap, an actual
-missing capability. `funding_type` has no taxonomy defined yet (what values
-would even be valid - "fully_funded"? "partial"? "stipend_only"?), and
-`provider_country` has no column on `Provider` at all, so there's no data to
-backfill even once one's added. Both need a real scoping decision before
-they can be built, not just a schema tweak - flag if these are blocking a
-design, since taxonomy shape is worth getting right once rather than
-iterating live.
+`funding_type` is how much of the cost is covered - `fully_funded` /
+`partial_funding` / `tuition_only` / `stipend_only`, from `GET /taxonomies`
+`funding_types`. **Don't confuse it with `award_type`** (already existed:
+`scholarship` / `fellowship` / `assistantship` / `studentship` / `grant`) -
+that's what *kind* of instrument the award is, a separate axis. A
+scholarship and a fellowship can each independently be fully-funded or
+partial; render both badges, don't collapse one into the other. Optional
+and null for most records today (only just started being captured at
+publish time, same rollout curve as `field_names`/`eligibility_note` when
+those launched).
+
+### Provider country
+
+`provider_country` is where the *provider* institution/organization is
+based - a fact about the provider, shared across every award it funds.
+**Don't confuse it with `destinations`** (the award's own study
+country/countries) - a UK-based foundation funding study in Canada
+legitimately has `provider_country: "GB"` and `destinations: ["CA"]` at the
+same time; neither implies the other. Null for a provider that hasn't had
+its country looked up and entered yet - most of the current catalog, since
+this just started being captured. Don't infer or guess it from
+`destinations`.
 
 ### Fields
 

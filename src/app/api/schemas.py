@@ -23,6 +23,8 @@ class TaxonomiesResponse(BaseModel):
     #: tagged with at publish time; not a search filter itself.
     narrow_fields: list[TaxonomyItem]
     award_types: list[TaxonomyItem]
+    #: How much of the cost an award covers - distinct from `award_types`.
+    funding_types: list[TaxonomyItem]
 
 
 class SearchRequest(BaseModel):
@@ -89,6 +91,15 @@ class SearchResult(BaseModel):
     #: `status_detail == "opening_soon"`/`"likely_to_reopen"` for copy; null
     #: means no such evidence exists, not "unknown year."
     expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
+    #: One of `GET /taxonomies` `funding_types`, or null when the reviewer
+    #: had no evidence of coverage level. Distinct from `award_type` - see
+    #: that field's own note.
+    funding_type: str | None = None
+    #: Where the *provider* institution/organization is based - a fact about
+    #: the provider, not this award's study destination (see
+    #: `destinations`). Null for a provider registered before this existed;
+    #: never guessed from `destinations`.
+    provider_country: str | None = None
     caveats: list[str] = Field(default_factory=list)
 
 

@@ -188,6 +188,7 @@ def _provider_read(provider: Provider) -> ProviderRead:
         provider_id=provider.provider_id,
         name=provider.name,
         approved_domains=provider.approved_domains,
+        country=provider.country,
     )
 
 
@@ -200,7 +201,10 @@ def _provider_read(provider: Provider) -> ProviderRead:
 async def create_provider_route(
     payload: ProviderCreateRequest, db: AsyncSession = Depends(get_db)
 ) -> ProviderRead:
-    provider = await create_provider(db, payload)
+    try:
+        provider = await create_provider(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _provider_read(provider)
 
 
@@ -547,6 +551,10 @@ def _search_result(
         deadline_precision=deadline_precision if deadline_at else None,
         degree_levels=facts.get("levels", []),
         expected_reopen_month=facts.get("expected_reopen_month"),
+        funding_type=facts.get("funding_type"),
+        provider_country=row.scholarship.provider.country
+        if row.scholarship and row.scholarship.provider
+        else None,
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -677,6 +685,7 @@ async def publish(
             eligibility_note=payload.eligibility_note,
             expected_reopen_month=payload.expected_reopen_month,
             field_names=payload.field_names,
+            funding_type=payload.funding_type,
             countries=countries,
         )
     except ValueError as exc:
@@ -785,12 +794,22 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
         destinations=_result_destinations(facts),
+        funding_type=facts.get("funding_type"),
+        provider_country=row.scholarship.provider.country,
         caveats=caveats,
     )
 
 
 TAXONOMY_TYPES = frozenset(
-    {"countries", "destinations", "degrees", "fields", "narrow_fields", "award_types"}
+    {
+        "countries",
+        "destinations",
+        "degrees",
+        "fields",
+        "narrow_fields",
+        "award_types",
+        "funding_types",
+    }
 )
 
 
@@ -865,6 +884,11 @@ async def taxonomies(
             TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
         ]
         if "award_types" in wanted
+        else [],
+        funding_types=[
+            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.funding_types.items()
+        ]
+        if "funding_types" in wanted
         else [],
     )
 

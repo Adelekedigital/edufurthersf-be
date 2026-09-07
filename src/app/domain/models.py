@@ -52,6 +52,11 @@ class Provider(TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255))
     approved_domains: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    #: Where this institution/organization is based - a fact about the
+    #: provider, not about any one award it funds (an award's own study
+    #: destination lives on the cycle, see ScholarshipCycle.facts). Nullable:
+    #: unknown for a provider registered before this existed, never guessed.
+    country: Mapped[str | None] = mapped_column(String(3), nullable=True)
 
 
 class Scholarship(TimestampMixin, Base):
