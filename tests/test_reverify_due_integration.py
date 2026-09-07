@@ -53,6 +53,8 @@ async def _publish(
     last_verified_at: datetime | None = None,
     created_at: datetime | None = None,
     public_status: PublicStatus = PublicStatus.open_verified,
+    facts: dict | None = None,
+    auto_downgraded: bool = False,
 ) -> ScholarshipCycle:
     provider = Provider(name="Example University", approved_domains=["example.test"])
     db.add(provider)
@@ -72,8 +74,9 @@ async def _publish(
         provider_cycle_key=f"{slug}-2026",
         official_cycle_url=f"https://example.test/{slug}/apply",
         public_status=public_status,
-        facts={},
+        facts=facts or {},
         last_verified_at=last_verified_at,
+        auto_downgraded=auto_downgraded,
     )
     db.add(cycle)
     await db.commit()
@@ -216,30 +219,134 @@ async def test_batch_limit_bounds_how_many_due_cycles_one_tick_processes(db, mon
     assert result["checked"] == 2
 
 
-async def test_an_unexpected_error_on_one_cycle_does_not_abort_the_sweep(db, monkeypatch) -> None:
-    """A genuinely unexpected error (not an ordinary fetch failure, which
-    _reverify_one_cycle already handles internally) must still let the
-    sweep move on to the next cycle rather than losing the whole tick."""
+async def test_a_malformed_url_is_handled_like_a_fetch_failure_not_lost(db, monkeypatch) -> None:
+    """canonicalize_url raising (an out-of-contract official_cycle_url) must
+    go through _defer_or_flag like any other fetch failure - not escape
+    _reverify_one_cycle entirely and skip escalation."""
     await _official_source(db)
-    broken = await _publish(db, slug="broken", last_verified_at=None, created_at=NOW)
-    healthy = await _publish(db, slug="healthy", last_verified_at=None, created_at=NOW)
+    broken = await _publish(
+        db, slug="broken", last_verified_at=None, created_at=NOW - timedelta(hours=72)
+    )
     _stub_fetch(monkeypatch)
 
-    original_canonicalize = freshness_module.canonicalize_url
+    def _raising_canonicalize(url):
+        raise ValueError("not a valid URL")
 
-    def _flaky_canonicalize(url):
-        if "broken" in url:
-            raise RuntimeError("unexpected failure")
-        return original_canonicalize(url)
+    monkeypatch.setattr(freshness_module, "canonicalize_url", _raising_canonicalize)
 
-    monkeypatch.setattr(freshness_module, "canonicalize_url", _flaky_canonicalize)
+    result = await reverify_due_cycles(db)
+    assert result == {"checked": 1, "renewed": 0, "flagged": 1, "deferred": 0}
+    tasks = list(await db.scalars(select(ReviewTask)))
+    assert len(tasks) == 1
+    assert tasks[0].cycle_id == broken.cycle_id
+    assert tasks[0].reason == "reverify_fetch_failed"
+
+
+async def test_an_unexpected_error_on_one_cycle_does_not_abort_the_sweep(db, monkeypatch) -> None:
+    """A genuinely unexpected error escaping _reverify_one_cycle's own
+    try/except (not an ordinary fetch/URL failure, which it now handles
+    internally) must still let the sweep move on to the next cycle rather
+    than losing the whole tick. deadline_cutoff is only ever reached (inside
+    _reverify_one_cycle) for a cycle with a deadline in its facts, and only
+    after a successful fetch - patching it raises well outside the try/except,
+    without touching pass 1's own separate classify_bucket/deadline_cutoff
+    call chain (a different module's own imported reference)."""
+    await _official_source(db)
+    broken = await _publish(
+        db,
+        slug="broken",
+        last_verified_at=None,
+        created_at=NOW,
+        facts={"deadline_at": (NOW + timedelta(days=30)).isoformat()},
+    )
+    healthy = await _publish(db, slug="healthy", last_verified_at=None, created_at=NOW)
+    _stub_fetch(monkeypatch)
+    # deadline_cutoff is only reached once a cycle already has a previous
+    # hash to compare against (past the first-ever-fetch early return) -
+    # establish that baseline for both cycles before patching.
+    first = await reverify_due_cycles(db)
+    assert first["deferred"] == 2
+
+    def _raising_deadline_cutoff(*args, **kwargs):
+        raise RuntimeError("unexpected failure")
+
+    monkeypatch.setattr(freshness_module, "deadline_cutoff", _raising_deadline_cutoff)
 
     result = await reverify_due_cycles(db)
     assert result["checked"] == 2
-    assert result["deferred"] == 1  # only the healthy cycle completed successfully
+    assert result["renewed"] == 1  # only the healthy (no-deadline) cycle completed
     await db.refresh(broken)
     await db.refresh(healthy)
-    assert broken.source_page_id is None
+
+
+async def test_a_confirmed_unchanged_recheck_restores_an_auto_downgraded_cycle(
+    db, monkeypatch
+) -> None:
+    """refresh_status's own staleness downgrade must not be permanent -
+    once reverify_due gets a real, fresh confirmation the record is
+    unchanged, it should come back to open_verified."""
+    await _official_source(db)
+    cycle = await _publish(
+        db,
+        public_status=PublicStatus.status_unknown,
+        auto_downgraded=True,
+        last_verified_at=None,
+        created_at=NOW,
+    )
+    _stub_fetch(monkeypatch, content=b"same content")
+    first = await reverify_due_cycles(db)
+    assert first["deferred"] == 1  # first-ever observation, no baseline yet
+
+    second = await reverify_due_cycles(db)
+    assert second == {"checked": 1, "renewed": 1, "flagged": 0, "deferred": 0}
+    await db.refresh(cycle)
+    assert cycle.public_status == PublicStatus.open_verified
+    assert cycle.auto_downgraded is False
+
+
+async def test_a_reviewers_own_status_unknown_is_never_auto_restored(db, monkeypatch) -> None:
+    """A cycle a reviewer published as status_unknown on purpose (never
+    auto_downgraded) must not be promoted to open_verified just because a
+    page fetch happens to come back unchanged - that proves nothing about
+    whether the reviewer's own uncertainty has been resolved."""
+    await _official_source(db)
+    cycle = await _publish(
+        db,
+        public_status=PublicStatus.status_unknown,
+        auto_downgraded=False,
+        last_verified_at=None,
+        created_at=NOW,
+    )
+    _stub_fetch(monkeypatch, content=b"same content")
+    await reverify_due_cycles(db)
+    await reverify_due_cycles(db)
+    await db.refresh(cycle)
+    assert cycle.public_status == PublicStatus.status_unknown
+
+
+async def test_unchanged_hash_with_a_lapsed_deadline_defers_without_a_review_task(
+    db, monkeypatch
+) -> None:
+    """A byte-identical page whose deadline has since passed is not a
+    content anomaly - refresh_status's own deadline-based downgrade already
+    handles this silently; reverify_due must not mislabel it as
+    reverify_content_changed with an identical previous/new hash."""
+    await _official_source(db)
+    cycle = await _publish(
+        db,
+        last_verified_at=None,
+        created_at=NOW,
+        facts={"deadline_at": (NOW - timedelta(days=1)).isoformat(), "deadline_precision": "date"},
+    )
+    _stub_fetch(monkeypatch, content=b"same content")
+    first = await reverify_due_cycles(db)
+    assert first["deferred"] == 1
+
+    second = await reverify_due_cycles(db)
+    assert second == {"checked": 1, "renewed": 0, "flagged": 0, "deferred": 1}
+    assert list(await db.scalars(select(ReviewTask))) == []
+    await db.refresh(cycle)
+    assert cycle.last_verified_at is None  # not renewed - the deadline lapsed
 
 
 def test_freshness_config_reads_every_configured_field() -> None:

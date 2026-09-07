@@ -629,6 +629,7 @@ async def review_queue(
                 state=task.state,
                 discovery_id=task.discovery_id,
                 revision_id=task.revision_id,
+                cycle_id=task.cycle_id,
                 raw_title=raw_title,
                 raw_excerpt=raw_excerpt,
                 extracted_facts=extracted_facts,

@@ -71,10 +71,15 @@ class Settings(BaseSettings):
     freshness_upcoming_near_fetch_hours: int = 24
     freshness_upcoming_far_fetch_hours: int = 168
     freshness_upcoming_max_age_hours: int = 336
+    # max_age is 2x fetch_hours for every other bucket, giving _defer_or_flag
+    # a single-failure retry grace period before it ever escalates - these
+    # two matched their own fetch_hours exactly, which meant the instant a
+    # cycle became due it was already past its evidence deadline too, so its
+    # very first fetch failure after becoming due escalated immediately.
     freshness_unknown_fetch_hours: int = 720
-    freshness_unknown_max_age_hours: int = 720
+    freshness_unknown_max_age_hours: int = 1440
     freshness_closed_fetch_hours: int = 2160
-    freshness_closed_max_age_hours: int = 2160
+    freshness_closed_max_age_hours: int = 4320
     refresh_status_batch_limit: int = 500
     reverify_due_batch_limit: int = 100
 
