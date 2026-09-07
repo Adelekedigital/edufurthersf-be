@@ -794,9 +794,9 @@ async def taxonomies(
     every origin while limiting where a search can be run.
 
     `types` narrows the response to just the requested collections (e.g.
-    `?types=fields&types=narrow_fields`) - omit it for the full vocabulary.
-    Unrequested collections come back as empty lists, not omitted keys, so
-    the response shape never changes.
+    `?types=fields&types=narrow_fields`) - omit it, or send it empty
+    (`?types=`), for the full vocabulary. Unrequested collections come back
+    as empty lists, not omitted keys, so the response shape never changes.
 
     Some HTTP clients serialize a repeated param with a bracket suffix
     (`types[]=fields`) instead of FastAPI's plain repeated-key form; that key
@@ -805,8 +805,9 @@ async def taxonomies(
     unfiltered vocabulary.
     """
     bracketed = request.query_params.getlist("types[]")
-    provided = types is not None or bool(bracketed)
-    wanted = {*(types or []), *bracketed} if provided else set(TAXONOMY_TYPES)
+    wanted = {value for value in (*(types or []), *bracketed) if value}
+    if not wanted:
+        wanted = set(TAXONOMY_TYPES)
     unknown = wanted - TAXONOMY_TYPES
     if unknown:
         raise HTTPException(

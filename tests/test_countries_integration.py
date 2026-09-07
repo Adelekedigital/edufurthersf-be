@@ -130,11 +130,17 @@ async def test_taxonomies_bracket_array_form_is_not_silently_ignored(db, client)
     assert body["narrow_fields"] == []
 
 
-async def test_taxonomies_empty_bracket_array_is_a_422_not_the_full_vocabulary(
-    db, client
-) -> None:
-    response = await client.get("/api/v1/taxonomies?types[]=")
-    assert response.status_code == 422
+async def test_taxonomies_empty_types_returns_the_full_vocabulary(db, client) -> None:
+    """An empty selection (`?types=`) means "no filter," same as omitting
+    `types` entirely - not an error, and not zero collections."""
+    omitted = (await client.get("/api/v1/taxonomies")).json()
+    empty_repeated = (await client.get("/api/v1/taxonomies?types=")).json()
+    empty_bracketed = (await client.get("/api/v1/taxonomies?types[]=")).json()
+    for body in (empty_repeated, empty_bracketed):
+        assert body["fields"] == omitted["fields"]
+        assert body["narrow_fields"] == omitted["narrow_fields"]
+        assert body["degrees"] == omitted["degrees"]
+        assert body["award_types"] == omitted["award_types"]
 
 
 async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
