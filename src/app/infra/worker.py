@@ -28,6 +28,7 @@ from app.domain.review_draft import draft_review_recommendation
 from app.infra.ai_router_client import AIRouterClient
 from app.infra.core_catalogue import CoreCatalogueClient
 from app.infra.countries import load_vocabulary, sync_countries
+from app.infra.freshness import refresh_due_statuses, reverify_due_cycles
 from app.infra.ingestion import import_feed_records
 from app.infra.jobs import (
     claim_job_for_execution,
@@ -65,6 +66,10 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await _prepare_review(db, job.payload)
         elif job.kind == "harvest_parsebot":
             await _harvest_parsebot(db)
+        elif job.kind == "refresh_status":
+            await refresh_due_statuses(db)
+        elif job.kind == "reverify_due":
+            await reverify_due_cycles(db)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.

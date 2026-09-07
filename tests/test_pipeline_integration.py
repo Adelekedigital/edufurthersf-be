@@ -98,7 +98,7 @@ async def test_worker_normalises_a_discovery(db) -> None:
 
 
 async def test_worker_records_failure_for_an_unhandled_kind(db) -> None:
-    job, created = await enqueue_job(db, "refresh_status", "dedupe-unhandled", {})
+    job, created = await enqueue_job(db, "no_such_kind", "dedupe-unhandled", {})
     assert created is True
     with pytest.raises(ValueError):
         await execute_job(db, job.job_id)

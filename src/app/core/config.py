@@ -55,6 +55,29 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
+    # Freshness/re-verification cadence (data-verification standard section
+    # 8), typed and environment-overridable rather than hardcoded literals
+    # scattered through job modules. Bucket-boundary thresholds first, then
+    # each bucket's fetch interval and maximum evidence age.
+    freshness_near_deadline_days: int = 14
+    freshness_upcoming_near_months: int = 1
+    freshness_upcoming_far_months: int = 2
+    freshness_open_far_fetch_hours: int = 24
+    freshness_open_far_max_age_hours: int = 48
+    freshness_open_near_fetch_hours: int = 6
+    freshness_open_near_max_age_hours: int = 12
+    freshness_rolling_fetch_hours: int = 24
+    freshness_rolling_max_age_hours: int = 48
+    freshness_upcoming_near_fetch_hours: int = 24
+    freshness_upcoming_far_fetch_hours: int = 168
+    freshness_upcoming_max_age_hours: int = 336
+    freshness_unknown_fetch_hours: int = 720
+    freshness_unknown_max_age_hours: int = 720
+    freshness_closed_fetch_hours: int = 2160
+    freshness_closed_max_age_hours: int = 2160
+    refresh_status_batch_limit: int = 500
+    reverify_due_batch_limit: int = 100
+
     @field_validator("database_url")
     @classmethod
     def use_async_database_driver(cls, value: str) -> str:

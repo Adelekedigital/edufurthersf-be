@@ -12,7 +12,7 @@ degrade-gracefully behavior they exist to verify.
 
 from __future__ import annotations
 
-from app.api.routes import _derive_facts
+from app.domain.facts import derive_facts as _derive_facts
 from app.domain.matching import _normalised_set
 
 BASE_FACTS = {

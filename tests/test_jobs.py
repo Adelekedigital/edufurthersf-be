@@ -17,6 +17,12 @@ def test_retryable_job_uses_bounded_retries() -> None:
     assert transition.next_attempt_at is not None
 
 
+def test_freshness_kinds_are_retryable() -> None:
+    for kind in ("refresh_status", "reverify_due"):
+        transition = fail_job(kind, 1, "temporary error", now=datetime.now(UTC))
+        assert transition.state == JobState.retry_wait
+
+
 def test_exhausted_or_non_retryable_job_goes_to_review() -> None:
     assert fail_job("normalize_discovery", 1, "bad data").state == JobState.failed_review
     assert fail_job("fetch_source_page", 5, "repeated error").state == JobState.failed_review

@@ -129,7 +129,7 @@ async def test_pending_events_are_held_rather_than_marked_delivered(db) -> None:
 async def test_the_worker_runs_the_maintenance_kinds(db) -> None:
     from app.infra.worker import execute_job
 
-    for kind in ("dispatch_outbox", "reconcile_stuck_jobs"):
+    for kind in ("dispatch_outbox", "reconcile_stuck_jobs", "refresh_status", "reverify_due"):
         job, _ = await enqueue_job(db, kind, f"maintenance-{kind}", {})
         assert await execute_job(db, job.job_id) == "completed"
         stored = await db.scalar(select(ProcessingJob).where(ProcessingJob.job_id == job.job_id))

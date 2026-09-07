@@ -122,6 +122,12 @@ class ScholarshipCycle(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     facts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    #: The SourcePage `reverify_due` re-fetches to reverify this cycle's
+    #: official_cycle_url. Null until that job's first encounter with this
+    #: cycle - see migrations/0021_cycle_reverification_link.py.
+    source_page_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("source_pages.page_id"), nullable=True
+    )
     scholarship: Mapped[Scholarship] = relationship(back_populates="cycles")
 
 
@@ -325,6 +331,15 @@ class ReviewTask(TimestampMixin, Base):
             unique=True,
             postgresql_where=text("state = 'open' AND resolution IS NULL"),
         ),
+        # Same guard, scoped to a cycle-linked task (refresh_status/
+        # reverify_due) instead of a discovery-linked one - see
+        # migrations/0021_cycle_reverification_link.py.
+        Index(
+            "uq_review_tasks_open_per_cycle",
+            "cycle_id",
+            unique=True,
+            postgresql_where=text("state = 'open' AND resolution IS NULL"),
+        ),
     )
     review_task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=new_uuid7
@@ -334,6 +349,9 @@ class ReviewTask(TimestampMixin, Base):
     )
     discovery_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("discoveries.discovery_id"), nullable=True
+    )
+    cycle_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("scholarship_cycles.cycle_id"), nullable=True
     )
     reason: Mapped[str] = mapped_column(String(255))
     priority: Mapped[int] = mapped_column(Integer, default=100)
