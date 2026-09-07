@@ -206,7 +206,7 @@ def _provider_read(provider: Provider) -> ProviderRead:
 async def create_provider_route(
     payload: ProviderCreateRequest, db: AsyncSession = Depends(get_db)
 ) -> ProviderRead:
-    countries = await load_vocabulary(db)
+    countries = await load_vocabulary(db) if payload.country is not None else None
     try:
         provider = await create_provider(db, payload, countries=countries)
     except ValueError as exc:
