@@ -34,6 +34,9 @@ class ScholarshipDetailResponse(BaseModel):
     #: See `SearchResult.field_names` - the source's own course/subject
     #: wording, alongside the normalised `facts["fields"]` codes.
     field_names: list[str] = Field(default_factory=list)
+    #: See `SearchResult.destinations` - this award's own destination
+    #: code(s), not to be inferred from a search filter.
+    destinations: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
     #: AI Router elaboration on this searcher's deterministic match decision
     #: - only ever set by `POST` with a profile; a bare `GET` (no profile,
