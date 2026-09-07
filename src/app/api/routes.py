@@ -224,6 +224,32 @@ async def list_providers_route(db: AsyncSession = Depends(get_db)) -> ProviderLi
     return ProviderListResponse(data=[_provider_read(provider) for provider in providers])
 
 
+def _cycle_admin_read(cycle: ScholarshipCycle, evaluated_at: datetime) -> ScholarshipCycleAdminRead:
+    # facts isn't schema-enforced below publish() and can come back as
+    # Python None even though the column is NOT NULL - JSONB.none_as_null
+    # defaults to False, so an ORM-level `cycle.facts = None` persists as
+    # the JSON null literal, not SQL NULL. Guard once, use everywhere below.
+    facts = cycle.facts or {}
+    return ScholarshipCycleAdminRead(
+        cycle_id=cycle.cycle_id,
+        provider_cycle_key=cycle.provider_cycle_key,
+        applicant_segment=cycle.applicant_segment,
+        official_cycle_url=cycle.official_cycle_url,
+        public_status=cycle.public_status.value,
+        evaluated_public_status=evaluate_public_status(
+            cycle.public_status,
+            deadline_at=_safe_deadline_at(facts.get("deadline_at")),
+            deadline_precision=facts.get("deadline_precision", "datetime"),
+            deadline_timezone=facts.get("deadline_timezone"),
+            status_valid_until=cycle.status_valid_until,
+            now=evaluated_at,
+        ).value,
+        status_valid_until=cycle.status_valid_until,
+        last_verified_at=cycle.last_verified_at,
+        facts=facts,
+    )
+
+
 def _scholarship_admin_read(
     scholarship: Scholarship, evaluated_at: datetime
 ) -> ScholarshipAdminRead:
@@ -237,25 +263,7 @@ def _scholarship_admin_read(
         provider_id=scholarship.provider_id,
         provider_name=scholarship.provider.name if scholarship.provider else "",
         cycles=[
-            ScholarshipCycleAdminRead(
-                cycle_id=cycle.cycle_id,
-                provider_cycle_key=cycle.provider_cycle_key,
-                applicant_segment=cycle.applicant_segment,
-                official_cycle_url=cycle.official_cycle_url,
-                public_status=cycle.public_status.value,
-                evaluated_public_status=evaluate_public_status(
-                    cycle.public_status,
-                    deadline_at=_safe_deadline_at(cycle.facts.get("deadline_at")),
-                    deadline_precision=cycle.facts.get("deadline_precision", "datetime"),
-                    deadline_timezone=cycle.facts.get("deadline_timezone"),
-                    status_valid_until=cycle.status_valid_until,
-                    now=evaluated_at,
-                ).value,
-                status_valid_until=cycle.status_valid_until,
-                last_verified_at=cycle.last_verified_at,
-                facts=cycle.facts or {},
-            )
-            for cycle in scholarship.cycles
+            _cycle_admin_read(cycle, evaluated_at) for cycle in scholarship.cycles
         ],
     )
 
@@ -534,10 +542,48 @@ class _DerivedFacts:
     destinations: list[str]
     eligibility_note: str | None
     field_names: list[str]
+    origin_mode: Literal["restricted", "unrestricted", "unknown"]
+    origins: list[str]
+    field_mode: Literal["restricted", "all", "unknown"]
+    fields: list[str]
+    evidence_fresh: bool
 
     @property
     def public_deadline_precision(self) -> Literal["date", "datetime"] | None:
         return self.deadline_precision if self.deadline_at else None
+
+    @property
+    def sanitized_dict(self) -> dict[str, Any]:
+        """The same key shape `build_cycle_facts` writes, rebuilt from these
+        sanitized values rather than passed through from the raw stored
+        dict - so `ScholarshipDetailResponse.facts` can never disagree with
+        this same dataclass's own typed response fields the way the raw
+        dict could (e.g. a garbled `deadline_precision` clamped to
+        "datetime" in the typed field but still showing the garbage value
+        verbatim in `facts`)."""
+        result: dict[str, Any] = {
+            "destinations": self.destinations,
+            "levels": self.degree_levels,
+            "origin_mode": self.origin_mode,
+            "origins": self.origins,
+            "field_mode": self.field_mode,
+            "fields": self.fields,
+            "evidence_fresh": self.evidence_fresh,
+        }
+        if self.eligibility_note is not None:
+            result["eligibility_note"] = self.eligibility_note
+        if self.expected_reopen_month is not None:
+            result["expected_reopen_month"] = self.expected_reopen_month
+        if self.field_names:
+            result["field_names"] = self.field_names
+        if self.funding_type is not None:
+            result["funding_type"] = self.funding_type
+        if self.deadline_at is not None:
+            result["deadline_at"] = self.deadline_at.isoformat()
+            result["deadline_precision"] = self.deadline_precision
+            if self.deadline_timezone is not None:
+                result["deadline_timezone"] = self.deadline_timezone
+        return result
 
 
 def _derive_facts(facts: dict) -> _DerivedFacts:
@@ -594,6 +640,18 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
     eligibility_note = raw_eligibility_note if isinstance(raw_eligibility_note, str) else None
     raw_deadline_timezone = facts.get("deadline_timezone")
     deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
+    raw_origin_mode = facts.get("origin_mode")
+    origin_mode: Literal["restricted", "unrestricted", "unknown"] = (
+        raw_origin_mode
+        if raw_origin_mode in ("restricted", "unrestricted", "unknown")
+        else "unknown"
+    )
+    raw_field_mode = facts.get("field_mode")
+    field_mode: Literal["restricted", "all", "unknown"] = (
+        raw_field_mode if raw_field_mode in ("restricted", "all", "unknown") else "unknown"
+    )
+    raw_evidence_fresh = facts.get("evidence_fresh")
+    evidence_fresh = raw_evidence_fresh if isinstance(raw_evidence_fresh, bool) else False
     return _DerivedFacts(
         deadline_at=deadline_at,
         deadline_precision=deadline_precision,
@@ -604,6 +662,11 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
         destinations=destinations,
         eligibility_note=eligibility_note,
         field_names=_string_list(facts.get("field_names", [])),
+        origin_mode=origin_mode,
+        origins=_string_list(facts.get("origins", [])),
+        field_mode=field_mode,
+        fields=_string_list(facts.get("fields", [])),
+        evidence_fresh=evidence_fresh,
     )
 
 
@@ -642,11 +705,9 @@ def _search_result(
     return SearchResult(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
-        name=row.scholarship.name if row.scholarship else "",
-        provider=row.scholarship.provider.name
-        if row.scholarship and row.scholarship.provider
-        else "",
-        award_type=row.scholarship.award_type if row.scholarship else "",
+        name=row.scholarship.name,
+        provider=row.scholarship.provider.name,
+        award_type=row.scholarship.award_type,
         status=status.value,
         status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
@@ -658,9 +719,7 @@ def _search_result(
         degree_levels=derived.degree_levels,
         expected_reopen_month=derived.expected_reopen_month,
         funding_type=derived.funding_type,
-        provider_country=row.scholarship.provider.country
-        if row.scholarship and row.scholarship.provider
-        else None,
+        provider_country=row.scholarship.provider.country,
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -892,7 +951,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         status_detail=status_detail,
         status_valid_until=row.status_valid_until,
         official_url=row.official_cycle_url,
-        facts=facts,
+        facts=derived.sanitized_dict,
         last_verified_at=row.last_verified_at,
         eligibility_note=derived.eligibility_note,
         field_names=derived.field_names,
@@ -1143,7 +1202,7 @@ async def search(
     matched: list[SearchResult] = [
         _search_result(row, decision, evaluated_at)
         for row in rows
-        if (decision := evaluate_match(profile, row.facts)) is not None
+        if (decision := evaluate_match(profile, row.facts or {})) is not None
     ]
     status_rank = {"open_verified": 0, "expected_to_reopen": 1, "status_unknown": 2}
     # Confirmed matches outrank possible ones inside a status group. The
@@ -1313,9 +1372,11 @@ async def scholarship_detail_with_explanation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    profile = SearchProfile(
-        origin, frozenset(facts.get("destinations", [])), degree, accepted_fields
-    )
+    # detail.destinations is already the sanitized value _detail() computed
+    # via _derive_facts - reuse it rather than re-deriving from raw facts,
+    # which would repeat the same explicit-null crash risk this exists to
+    # avoid (facts.get("destinations", []) doesn't catch an explicit null).
+    profile = SearchProfile(origin, frozenset(detail.destinations), degree, accepted_fields)
     decision = evaluate_match(profile, facts)
     if decision is None:
         return detail
