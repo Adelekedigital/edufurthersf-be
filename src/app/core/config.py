@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     match_explanation_enabled: bool = False
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
+    # Tri-state: None defaults to is_deployed (on for staging/production, off
+    # for local development) so a new deployed environment doesn't need a
+    # manual flip; an explicit true/false overrides that default independent
+    # of whether SENTRY_DSN happens to be set - a leftover/shared DSN in a
+    # local .env must not be enough to activate Sentry on a laptop.
+    sentry_enabled: bool | None = None
+    posthog_api_key: str | None = None
+    posthog_host: str = "https://us.i.posthog.com"
+    # Same tri-state rationale as sentry_enabled above.
+    posthog_dispatch_enabled: bool | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -88,6 +98,18 @@ class Settings(BaseSettings):
     @property
     def is_deployed(self) -> bool:
         return self.environment.lower() in DEPLOYED_ENVIRONMENTS
+
+    @property
+    def sentry_active(self) -> bool:
+        return self.sentry_enabled if self.sentry_enabled is not None else self.is_deployed
+
+    @property
+    def posthog_dispatch_active(self) -> bool:
+        return (
+            self.posthog_dispatch_enabled
+            if self.posthog_dispatch_enabled is not None
+            else self.is_deployed
+        )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
