@@ -233,6 +233,50 @@ async def test_a_result_carries_its_own_destination_not_the_search_filter(db, cl
     assert detail["destinations"] == ["CA"]
 
 
+async def test_search_result_exposes_deadline_and_degree_levels(db, client) -> None:
+    """These are already computed internally for status/status_detail - the
+    search card needs them surfaced directly rather than reverse-engineered
+    from status_detail copy."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={
+            **CYCLE,
+            "deadline_at": "2026-12-31T00:00:00Z",
+            "deadline_precision": "date",
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["deadline_at"].startswith("2026-12-31")
+    assert result["deadline_precision"] == "date"
+    assert result["degree_levels"] == ["masters"]
+    assert result["expected_reopen_month"] is None
+
+
+async def test_search_result_exposes_expected_reopen_month_not_a_deadline(db, client) -> None:
+    """A `expected_to_reopen` cycle has no deadline at all - only a cyclic
+    month, never a fabricated year."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={
+            **CYCLE,
+            "public_status": "expected_to_reopen",
+            "expected_reopen_month": 2,
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["expected_reopen_month"] == 2
+    assert result["deadline_at"] is None
+    assert result["deadline_precision"] is None
+
+
 async def test_a_second_cycle_can_be_added_to_an_already_published_scholarship(db, client) -> None:
     """A new intake is not a reason to unpublish the last one."""
     scholarship = await _approved_scholarship(db)

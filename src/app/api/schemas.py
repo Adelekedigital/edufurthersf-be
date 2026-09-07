@@ -74,6 +74,21 @@ class SearchResult(BaseModel):
     #: target several countries at once, and which one(s) this specific award
     #: actually covers is a fact about the award, not about the query.
     destinations: list[str] = Field(default_factory=list)
+    #: Null when this award has no fixed deadline (rolling, or not yet set).
+    deadline_at: datetime | None = None
+    #: Whether `deadline_at` is evidenced down to the minute or only the day
+    #: - render "by 12 Sep 2026" for `"date"`, not a fabricated time of day.
+    #: Meaningless (and always omitted from `facts`) when `deadline_at` is
+    #: null.
+    deadline_precision: Literal["date", "datetime"] | None = None
+    #: TAXONOMY.degrees codes this cycle accepts, from `facts["levels"]` -
+    #: not to be confused with `field`/`fields`, which is subject not level.
+    degree_levels: list[str] = Field(default_factory=list)
+    #: A cyclic month number (1-12), never a year - the source rarely commits
+    #: to a specific year for "reopens around February." Pair with
+    #: `status_detail == "opening_soon"`/`"likely_to_reopen"` for copy; null
+    #: means no such evidence exists, not "unknown year."
+    expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
     caveats: list[str] = Field(default_factory=list)
 
 

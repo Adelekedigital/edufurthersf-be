@@ -38,6 +38,15 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    own country, mislabeling awards from a multi-destination search (e.g. a
    Canada-only award showing as "United States"). See "Destination display"
    below - stop reading a result's country off the search filter.
+8. **`deadline_at`, `deadline_precision`, `degree_levels`, and
+   `expected_reopen_month` are new** on every search result - all four were
+   already computed server-side for `status`/`status_detail` but never
+   returned, so a card had no way to show an actual deadline date or degree
+   badge without parsing `status_detail` copy. Two requested fields are
+   **not** included: `funding_type` and `provider_country` don't exist
+   anywhere in the data model yet (no taxonomy, no `Provider.country`
+   column) - see "Not yet available" below rather than assuming they're
+   coming in the next handoff.
 
 ## `GET /taxonomies`
 
@@ -103,6 +112,10 @@ back to the full vocabulary when populated.
       "eligibility_note": "Not open to UK nationals.", // present only for a restriction the schema can't otherwise represent
       "field_names": ["MSc Development Economics"], // source's own wording, for display - not a filter value
       "destinations": ["CA"], // this award's own destination code(s) - see "Destination display" below
+      "deadline_at": "2026-12-31T00:00:00Z", // null when rolling/not yet set
+      "deadline_precision": "date", // "date" | "datetime" | null (null iff deadline_at is null) - "date" means don't render a time of day
+      "degree_levels": ["masters"], // GET /taxonomies `degrees` codes this cycle accepts
+      "expected_reopen_month": null, // 1-12, cyclic - never a year. Only meaningful with status "expected_to_reopen"
       "caveats": ["Some eligibility conditions need checking."]
     }
   ],
@@ -138,6 +151,31 @@ which one(s) a given award actually covers is a fact about the award, not
 about the query. Look the code(s) up in the `destinations` you already
 fetched from `GET /taxonomies` for the label, the same way you already do
 for the search form.
+
+### Deadline, degree, and reopen month (per result)
+
+- `deadline_at` / `deadline_precision`: null/null together when there's no
+  deadline (rolling, or not yet set). When present, `deadline_precision`
+  `"date"` means render a date only ("by 31 Dec 2026") - the time-of-day
+  component of `deadline_at` is not evidenced and must not be shown or used
+  for a live countdown; `"datetime"` means the full instant is real.
+- `degree_levels`: this cycle's accepted `GET /taxonomies` `degrees` codes
+  (e.g. `["masters", "doctorate"]`) - not the same taxonomy as `fields`.
+- `expected_reopen_month`: a bare month number, 1-12, cyclic - there is no
+  year in the data (`"reopens around February"`, not a specific date), so
+  don't render one. Only meaningful when `status` is `"expected_to_reopen"`;
+  null otherwise.
+
+### Not yet available: `funding_type`, `provider_country`
+
+Neither exists anywhere in the backend today - not a display gap, an actual
+missing capability. `funding_type` has no taxonomy defined yet (what values
+would even be valid - "fully_funded"? "partial"? "stipend_only"?), and
+`provider_country` has no column on `Provider` at all, so there's no data to
+backfill even once one's added. Both need a real scoping decision before
+they can be built, not just a schema tweak - flag if these are blocking a
+design, since taxonomy shape is worth getting right once rather than
+iterating live.
 
 ### Fields
 
