@@ -116,8 +116,12 @@ class SearchMeta(BaseModel):
     #: copies drift out of sync with no test to catch it.
     match_policy_version: str
     taxonomy_version: str
-    confirmed_counts: dict[str, int]
-    possible_match_count: int
+    #: Never null on a live POST /search response - that path always
+    #: aggregates these fresh from the whole matched set. Null only when
+    #: replaying (GET /search/{search_id}) a search stored before this pair
+    #: started being persisted in build_result_snapshot's meta.
+    confirmed_counts: dict[str, int] | None
+    possible_match_count: int | None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -125,3 +129,18 @@ class SearchResponse(BaseModel):
     data: list[SearchResult]
     next_cursor: str | None = None
     meta: SearchMeta
+
+
+class SearchReplayResponse(BaseModel):
+    """`GET /search/{search_id}`'s own response shape - kept separate from
+    `SearchResponse` rather than extending it, so `POST /search`'s response
+    contract stays exactly as it is today."""
+
+    data: list[SearchResult]
+    next_cursor: str | None = None
+    meta: SearchMeta
+    #: The exact filters this search ran with (Search.filters verbatim:
+    #: origin_country, target_countries, program_level, field) - already the
+    #: shape POST /scholarships/{id}'s MatchProfileRequest needs to restore a
+    #: personalized modal explanation without the caller re-deriving it.
+    filters: dict

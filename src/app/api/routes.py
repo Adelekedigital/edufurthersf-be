@@ -33,6 +33,7 @@ from app.api.review_schemas import (
 )
 from app.api.schemas import (
     SearchMeta,
+    SearchReplayResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
@@ -85,6 +86,7 @@ from app.infra.scholarship_admin import search_scholarships
 from app.infra.sessions import (
     SESSION_COOKIE,
     filter_digest,
+    get_existing_session,
     get_or_create_session,
     record_search_response,
 )
@@ -981,6 +983,67 @@ async def create_join_intent(
     )
 
 
+search_replay_limiter = InMemoryRateLimiter()
+
+
+@router.get("/search/{search_id}", response_model=SearchReplayResponse)
+async def get_search(
+    search_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db)
+) -> SearchReplayResponse:
+    """Replay a retained search's first page without re-running matching.
+
+    Scoped to the requesting session, the same as `create_join_intent`'s own
+    `search_id`/`session_id` check: a search id alone must not be enough for
+    a different visitor to read someone else's filters/results. Unknown,
+    someone else's, and expired all collapse to the same 404 - nothing here
+    should let a caller distinguish "never existed" from "not yours."
+    """
+    settings = get_settings()
+    limiter_key = request.client.host if request.client else "unknown"
+    if not search_replay_limiter.allow(limiter_key, settings.api_rate_limit_per_minute):
+        raise HTTPException(
+            status_code=429,
+            detail="Search replay rate limit exceeded",
+            headers={"Retry-After": "60"},
+        )
+    session = await get_existing_session(db, request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    stored = await db.scalar(
+        select(Search).where(
+            Search.search_id == search_id,
+            Search.session_id == session.session_id,
+            Search.page_number == 1,
+            Search.expires_at > datetime.now(UTC),
+        )
+    )
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    snapshot = stored.result_snapshot
+    next_cursor = (
+        encode_cursor(
+            stored.requested_limit, stored.filter_digest, stored.search_id, settings.cursor_secret
+        )
+        if snapshot["pagination"]["has_next_page"]
+        else None
+    )
+    return SearchReplayResponse(
+        data=snapshot["data"],
+        next_cursor=next_cursor,
+        meta=SearchMeta(
+            search_id=stored.search_id,
+            response_id=stored.id,
+            evaluated_at=stored.evaluated_at,
+            match_policy_version=stored.match_policy_version,
+            taxonomy_version=stored.taxonomy_version,
+            confirmed_counts=snapshot["meta"].get("confirmed_counts"),
+            possible_match_count=snapshot["meta"].get("possible_match_count"),
+            warnings=snapshot["meta"]["warnings"],
+        ),
+        filters=stored.filters,
+    )
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search(
     payload: SearchRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
@@ -1078,6 +1141,7 @@ async def search(
     for item in matched:
         if item.fit == "confirmed":
             confirmed_counts[item.status] = confirmed_counts.get(item.status, 0) + 1
+    possible_match_count = sum(item.fit == "possible" for item in matched)
     data = matched[offset : offset + payload.limit]
     has_next_page = offset + payload.limit < len(matched)
     next_cursor = (
@@ -1096,6 +1160,8 @@ async def search(
         total_match_count=len(matched),
         has_next_page=has_next_page,
         warnings=warnings,
+        confirmed_counts=confirmed_counts,
+        possible_match_count=possible_match_count,
     )
     stored = await record_search_response(
         db,
@@ -1125,7 +1191,7 @@ async def search(
                 "filters": filters,
                 "total_match_count": len(matched),
                 "confirmed_counts": confirmed_counts,
-                "possible_match_count": sum(item.fit == "possible" for item in matched),
+                "possible_match_count": possible_match_count,
                 "match_policy_version": MATCH_POLICY_VERSION,
                 "taxonomy_version": TAXONOMY.version,
             },
@@ -1143,7 +1209,7 @@ async def search(
             match_policy_version=MATCH_POLICY_VERSION,
             taxonomy_version=TAXONOMY.version,
             confirmed_counts=confirmed_counts,
-            possible_match_count=sum(item.fit == "possible" for item in matched),
+            possible_match_count=possible_match_count,
             warnings=warnings,
         ),
     )
