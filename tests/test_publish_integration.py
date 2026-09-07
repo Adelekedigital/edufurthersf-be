@@ -481,6 +481,28 @@ async def test_funding_type_is_optional_and_absent_by_default(db, client) -> Non
     assert result["funding_type"] is None
 
 
+async def test_funding_type_read_uses_the_same_normalization_as_publish(db, client) -> None:
+    """A value that would validate at publish time (TAXONOMY.funding_type()
+    strips/lowercases before checking) must not silently read back as null
+    just because a row written outside publish() didn't normalize it first
+    - the read side has to apply the exact same rule, not a stricter one."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "funding_type": " Fully_Funded "}
+    db.add(cycle)
+    await db.commit()
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["funding_type"] == "fully_funded"
+
+
 async def test_provider_country_is_the_providers_own_fact_not_the_study_destination(
     db, client
 ) -> None:

@@ -245,9 +245,7 @@ def _scholarship_admin_read(
                 public_status=cycle.public_status.value,
                 evaluated_public_status=evaluate_public_status(
                     cycle.public_status,
-                    deadline_at=datetime.fromisoformat(cycle.facts["deadline_at"])
-                    if cycle.facts.get("deadline_at")
-                    else None,
+                    deadline_at=_safe_deadline_at(cycle.facts.get("deadline_at")),
                     deadline_precision=cycle.facts.get("deadline_precision", "datetime"),
                     deadline_timezone=cycle.facts.get("deadline_timezone"),
                     status_valid_until=cycle.status_valid_until,
@@ -507,6 +505,18 @@ def _string_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str)]
 
 
+def _safe_deadline_at(value: Any) -> datetime | None:
+    """`facts["deadline_at"]` isn't guaranteed to be a valid ISO string once
+    a row can be written outside `publish()` - a bare `fromisoformat` call
+    raises ValueError/TypeError on anything else."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class _DerivedFacts:
     deadline_at: datetime | None
@@ -551,13 +561,7 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
     the same sanitized values to both the status computation and the public
     fields closes all three at once.
     """
-    deadline_at_raw = facts.get("deadline_at")
-    deadline_at = None
-    if deadline_at_raw:
-        try:
-            deadline_at = datetime.fromisoformat(deadline_at_raw)
-        except (TypeError, ValueError):
-            deadline_at = None
+    deadline_at = _safe_deadline_at(facts.get("deadline_at"))
     raw_precision = facts.get("deadline_precision", "datetime")
     deadline_precision: Literal["date", "datetime"] = (
         raw_precision if raw_precision in ("date", "datetime") else "datetime"
@@ -571,11 +575,15 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
         else None
     )
     raw_funding_type = facts.get("funding_type")
-    funding_type = (
-        raw_funding_type
-        if isinstance(raw_funding_type, str) and raw_funding_type in TAXONOMY.funding_types
-        else None
-    )
+    funding_type = None
+    if isinstance(raw_funding_type, str):
+        try:
+            # Reuse the same validator publish() uses (strip/lower included)
+            # rather than a second, separately-maintained membership check
+            # that could drift out of sync with what publish-time accepts.
+            funding_type = TAXONOMY.funding_type(raw_funding_type)
+        except ValueError:
+            funding_type = None
     raw_destinations = facts.get("destinations", [])
     destinations = (
         sorted({str(value) for value in raw_destinations})
