@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import select
 
 from app.domain.jobs import JobState, claim_job, is_lease_expired
 from app.domain.models import OutboxEvent, ProcessingJob
+from app.infra import outbox as outbox_module
 from app.infra.jobs import claim_job_for_execution, due_jobs, enqueue_job, fail_job_for_execution
 from app.infra.outbox import (
     DESTINATION_ANALYTICS,
@@ -114,7 +117,8 @@ async def test_an_analytics_event_is_written_once_per_dedupe_key(db) -> None:
 
 
 async def test_pending_events_are_held_rather_than_marked_delivered(db) -> None:
-    """No analytics vendor is connected yet, so nothing may claim delivery."""
+    """No PostHog key/gate is configured in tests by default, so nothing may
+    claim delivery - this must stay true regardless of what's deployed."""
     await enqueue_analytics_event(db, event_type="thing", dedupe_key="held-1", payload={})
     await db.commit()
 
@@ -124,6 +128,79 @@ async def test_pending_events_are_held_rather_than_marked_delivered(db) -> None:
     event = await db.scalar(select(OutboxEvent))
     assert event.state == "pending", "an undelivered event must not be marked dispatched"
     assert event.dispatched_at is None
+
+
+@dataclass(frozen=True)
+class _FakeSettings:
+    posthog_dispatch_active: bool
+    posthog_api_key: str | None
+    posthog_host: str = "https://posthog.test"
+
+
+async def test_dispatch_is_held_when_the_gate_is_off_even_with_a_key(db, monkeypatch) -> None:
+    """The environment gate and the key are both required - a key alone
+    (e.g. left set while ENVIRONMENT is switched back to development) must
+    not be enough to start sending real events."""
+    monkeypatch.setattr(
+        outbox_module, "get_settings", lambda: _FakeSettings(False, "a-real-key")
+    )
+    await enqueue_analytics_event(db, event_type="thing", dedupe_key="gated-1", payload={})
+    await db.commit()
+
+    result = await dispatch_analytics_events(db)
+    assert result == {"held": 1, "dispatched": 0}
+
+
+async def test_dispatch_sends_and_marks_dispatched_on_success(db, monkeypatch) -> None:
+    monkeypatch.setattr(
+        outbox_module, "get_settings", lambda: _FakeSettings(True, "a-real-key")
+    )
+    sent_batches = []
+
+    async def _fake_send_batch(events, *, api_key, host, timeout=10.0):
+        sent_batches.append((api_key, host, events))
+
+    monkeypatch.setattr(outbox_module, "send_batch", _fake_send_batch)
+    await enqueue_analytics_event(
+        db, event_type="scholarship_search_completed", dedupe_key="sent-1", payload={"n": 1}
+    )
+    await db.commit()
+
+    result = await dispatch_analytics_events(db)
+    assert result == {"held": 0, "dispatched": 1}
+    assert sent_batches[0][0] == "a-real-key"
+    assert sent_batches[0][1] == "https://posthog.test"
+
+    event = await db.scalar(select(OutboxEvent))
+    assert event.state == "dispatched"
+    assert event.dispatched_at is not None
+
+
+async def test_dispatch_marks_failed_and_eventually_dead_letters(db, monkeypatch) -> None:
+    monkeypatch.setattr(
+        outbox_module, "get_settings", lambda: _FakeSettings(True, "a-real-key")
+    )
+
+    async def _failing_send_batch(events, *, api_key, host, timeout=10.0):
+        raise httpx.HTTPStatusError(
+            "boom", request=httpx.Request("POST", host), response=httpx.Response(500)
+        )
+
+    monkeypatch.setattr(outbox_module, "send_batch", _failing_send_batch)
+    await enqueue_analytics_event(db, event_type="thing", dedupe_key="fail-1", payload={})
+    await db.commit()
+
+    for _ in range(outbox_module.MAX_DISPATCH_ATTEMPTS - 1):
+        result = await dispatch_analytics_events(db)
+        assert result == {"held": 0, "dispatched": 0, "failed": 1}
+        event = await db.scalar(select(OutboxEvent))
+        assert event.state == "pending"
+
+    await dispatch_analytics_events(db)
+    event = await db.scalar(select(OutboxEvent))
+    assert event.state == "dead_letter"
+    assert event.attempts == outbox_module.MAX_DISPATCH_ATTEMPTS
+    assert "boom" in event.payload["last_error"]
 
 
 async def test_the_worker_runs_the_maintenance_kinds(db) -> None:

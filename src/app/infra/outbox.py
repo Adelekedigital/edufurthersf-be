@@ -12,18 +12,23 @@ destination — analytics events must never reach an email sender.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.ids import new_uuid7
 from app.domain.models import OutboxEvent
+from app.infra.posthog_client import send_batch
 
-#: Analytics destination. PostHog is the chosen platform; the dispatcher below
-#: does not talk to it yet, so events accumulate durably until it is connected.
+logger = logging.getLogger("app.infra.outbox")
+
+#: Analytics destination. PostHog is the chosen platform.
 DESTINATION_ANALYTICS = "posthog"
 
 MAX_DISPATCH_ATTEMPTS = 5
@@ -79,21 +84,45 @@ async def claim_pending_events(
 async def dispatch_analytics_events(db: AsyncSession, *, limit: int = 100) -> dict[str, int]:
     """Dispatch pending analytics events.
 
-    No analytics vendor is connected yet, so events are held rather than sent.
-    Marking them delivered here would destroy the record the dispatcher exists
-    to protect, and dropping them would lose it, so they stay pending and
-    visible. Connecting PostHog means sending the batch and marking the rows
-    from its result; nothing else about this boundary changes.
+    Both the environment gate (`posthog_dispatch_active` - off by default in
+    local development even once a key exists, see `Settings`) and a
+    configured API key are required before anything is actually sent.
+    Without either, events are held rather than sent: marking them delivered
+    here would destroy the record the dispatcher exists to protect, and
+    dropping them would lose it, so they stay pending and visible.
+
+    PostHog's batch endpoint accepts or rejects the whole batch, not
+    individual events, so every event in one call's batch is marked
+    dispatched - or failed - together.
     """
+    settings = get_settings()
     events = await claim_pending_events(db, destination=DESTINATION_ANALYTICS, limit=limit)
-    held = len(events)
+    if not (settings.posthog_dispatch_active and settings.posthog_api_key):
+        held = len(events)
+        await db.commit()
+        return {"held": held, "dispatched": 0}
+    if not events:
+        await db.commit()
+        return {"held": 0, "dispatched": 0}
+    try:
+        await send_batch(events, api_key=settings.posthog_api_key, host=settings.posthog_host)
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "posthog_dispatch_failed", extra={"batch_size": len(events), "error": str(exc)[:500]}
+        )
+        for event in events:
+            await mark_failed(db, event, str(exc))
+        await db.commit()
+        return {"held": 0, "dispatched": 0, "failed": len(events)}
+    for event in events:
+        await mark_dispatched(db, event)
     await db.commit()
-    return {"held": held, "dispatched": 0}
+    return {"held": 0, "dispatched": len(events)}
 
 
 async def mark_dispatched(db: AsyncSession, event: OutboxEvent) -> None:
     event.state = "dispatched"
-    event.payload = {**event.payload, "dispatched_at": datetime.now(UTC).isoformat()}
+    event.dispatched_at = datetime.now(UTC)
 
 
 async def mark_failed(db: AsyncSession, event: OutboxEvent, error: str) -> None:
