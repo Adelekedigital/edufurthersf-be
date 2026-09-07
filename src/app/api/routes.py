@@ -2,9 +2,10 @@ import asyncio
 import hmac
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -101,7 +102,11 @@ JOIN_INTENTS_PER_MINUTE = 5
 # target; passing it emits a warning instead of silently truncating results.
 PUBLISHED_CYCLE_SCAN_LIMIT = 2000
 #: Version of the deterministic ranking policy recorded with every response.
-MATCH_POLICY_VERSION = "match-v1"
+#: Bump this whenever evaluate_match's actual gating/scoring semantics
+#: change (not just the vocabulary it validates against) - v2 marks the
+#: ISCED-F field-matching rewrite (equality -> broad/narrow set
+#: intersection, commit 68157fd) that shipped without a version bump.
+MATCH_POLICY_VERSION = "match-v2"
 join_limiter = InMemoryRateLimiter()
 
 
@@ -188,6 +193,7 @@ def _provider_read(provider: Provider) -> ProviderRead:
         provider_id=provider.provider_id,
         name=provider.name,
         approved_domains=provider.approved_domains,
+        country=provider.country,
     )
 
 
@@ -200,7 +206,11 @@ def _provider_read(provider: Provider) -> ProviderRead:
 async def create_provider_route(
     payload: ProviderCreateRequest, db: AsyncSession = Depends(get_db)
 ) -> ProviderRead:
-    provider = await create_provider(db, payload)
+    countries = await load_vocabulary(db) if payload.country is not None else None
+    try:
+        provider = await create_provider(db, payload, countries=countries)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _provider_read(provider)
 
 
@@ -235,9 +245,7 @@ def _scholarship_admin_read(
                 public_status=cycle.public_status.value,
                 evaluated_public_status=evaluate_public_status(
                     cycle.public_status,
-                    deadline_at=datetime.fromisoformat(cycle.facts["deadline_at"])
-                    if cycle.facts.get("deadline_at")
-                    else None,
+                    deadline_at=_safe_deadline_at(cycle.facts.get("deadline_at")),
                     deadline_precision=cycle.facts.get("deadline_precision", "datetime"),
                     deadline_timezone=cycle.facts.get("deadline_timezone"),
                     status_valid_until=cycle.status_valid_until,
@@ -487,11 +495,116 @@ async def bulk_review_decision(
     return BulkReviewDecisionResponse(results=results)
 
 
-def _result_destinations(facts: dict) -> list[str]:
-    """`build_cycle_facts` already dedupes/sorts this at write time - this
-    re-normalizes anyway so the two read sites can't silently drift apart on
-    how they handle it."""
-    return sorted({str(v) for v in facts.get("destinations", [])})
+def _string_list(value: Any) -> list[str]:
+    """A facts JSONB list field isn't guaranteed to actually be a list - a
+    bare `for x in value` over a non-list raises TypeError, and a non-string
+    item fails `list[str]` validation building the response. Silently drops
+    anything that isn't a string rather than crash over one bad item."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _safe_deadline_at(value: Any) -> datetime | None:
+    """`facts["deadline_at"]` isn't guaranteed to be a valid ISO string once
+    a row can be written outside `publish()` - a bare `fromisoformat` call
+    raises ValueError/TypeError on anything else."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class _DerivedFacts:
+    deadline_at: datetime | None
+    #: Never null - a value the contract can't represent (missing, or out of
+    #: {"date","datetime"}) clamps to "datetime", the same fallback already
+    #: used when the key is simply absent, so this feeds `evaluate_public_status`/
+    #: `evaluate_status_detail` identically regardless of what the public
+    #: field ends up showing. Use `.public_deadline_precision` for the
+    #: response field itself - null whenever there's no deadline at all.
+    deadline_precision: Literal["date", "datetime"]
+    deadline_timezone: str | None
+    degree_levels: list[str]
+    expected_reopen_month: int | None
+    funding_type: str | None
+    destinations: list[str]
+    eligibility_note: str | None
+    field_names: list[str]
+
+    @property
+    def public_deadline_precision(self) -> Literal["date", "datetime"] | None:
+        return self.deadline_precision if self.deadline_at else None
+
+
+def _derive_facts(facts: dict) -> _DerivedFacts:
+    """One sanitization pass over a cycle's `facts` JSONB, shared by
+    `_search_result` and `_detail`.
+
+    `facts` isn't schema-enforced below `publish()` - a row written directly
+    by one of this repo's own one-off admin/backfill scripts could hold a
+    value outside contract for any of these. Three failure modes that matter
+    here: an unguarded value can crash the whole response building a
+    strictly-typed SearchResult/ScholarshipDetailResponse field (a non-ISO
+    deadline_at, a non-Literal deadline_precision, a non-list `levels`/
+    `field_names` or one with non-string items, a non-string
+    eligibility_note); `raw_value in TAXONOMY.funding_types` raises
+    TypeError instead of returning False if `raw_value` is unhashable (a
+    list or dict), so an isinstance check has to come first; and, subtler,
+    computing status/status_detail from the *raw* value while only
+    sanitizing what's shown to the caller produces an internally
+    contradictory response (status_detail: "opening_soon" next to a nulled
+    expected_reopen_month). Deriving everything once, upfront, and feeding
+    the same sanitized values to both the status computation and the public
+    fields closes all three at once.
+    """
+    deadline_at = _safe_deadline_at(facts.get("deadline_at"))
+    raw_precision = facts.get("deadline_precision", "datetime")
+    deadline_precision: Literal["date", "datetime"] = (
+        raw_precision if raw_precision in ("date", "datetime") else "datetime"
+    )
+    raw_reopen_month = facts.get("expected_reopen_month")
+    expected_reopen_month = (
+        raw_reopen_month
+        if isinstance(raw_reopen_month, int)
+        and not isinstance(raw_reopen_month, bool)
+        and 1 <= raw_reopen_month <= 12
+        else None
+    )
+    raw_funding_type = facts.get("funding_type")
+    funding_type = None
+    if isinstance(raw_funding_type, str):
+        try:
+            # Reuse the same validator publish() uses (strip/lower included)
+            # rather than a second, separately-maintained membership check
+            # that could drift out of sync with what publish-time accepts.
+            funding_type = TAXONOMY.funding_type(raw_funding_type)
+        except ValueError:
+            funding_type = None
+    raw_destinations = facts.get("destinations", [])
+    destinations = (
+        sorted({str(value) for value in raw_destinations})
+        if isinstance(raw_destinations, list)
+        else []
+    )
+    raw_eligibility_note = facts.get("eligibility_note")
+    eligibility_note = raw_eligibility_note if isinstance(raw_eligibility_note, str) else None
+    raw_deadline_timezone = facts.get("deadline_timezone")
+    deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
+    return _DerivedFacts(
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=deadline_timezone,
+        degree_levels=_string_list(facts.get("levels", [])),
+        expected_reopen_month=expected_reopen_month,
+        funding_type=funding_type,
+        destinations=destinations,
+        eligibility_note=eligibility_note,
+        field_names=_string_list(facts.get("field_names", [])),
+    )
 
 
 def _search_result(
@@ -506,24 +619,21 @@ def _search_result(
     award was open.
     """
     facts = row.facts or {}
-    deadline_at_raw = facts.get("deadline_at")
-    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
-    deadline_precision = facts.get("deadline_precision", "datetime")
-    deadline_timezone = facts.get("deadline_timezone")
+    derived = _derive_facts(facts)
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
         status_valid_until=row.status_valid_until,
         now=evaluated_at,
     )
     status_detail = evaluate_status_detail(
         status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
-        expected_reopen_month=facts.get("expected_reopen_month"),
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
+        expected_reopen_month=derived.expected_reopen_month,
         now=evaluated_at,
     )
     caveats = list(decision.caveats)
@@ -540,9 +650,17 @@ def _search_result(
         status=status.value,
         status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
-        eligibility_note=facts.get("eligibility_note"),
-        field_names=facts.get("field_names", []),
-        destinations=_result_destinations(facts),
+        eligibility_note=derived.eligibility_note,
+        field_names=derived.field_names,
+        destinations=derived.destinations,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.public_deadline_precision,
+        degree_levels=derived.degree_levels,
+        expected_reopen_month=derived.expected_reopen_month,
+        funding_type=derived.funding_type,
+        provider_country=row.scholarship.provider.country
+        if row.scholarship and row.scholarship.provider
+        else None,
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -673,6 +791,7 @@ async def publish(
             eligibility_note=payload.eligibility_note,
             expected_reopen_month=payload.expected_reopen_month,
             field_names=payload.field_names,
+            funding_type=payload.funding_type,
             countries=countries,
         )
     except ValueError as exc:
@@ -742,25 +861,22 @@ async def run_due_jobs_route(
 
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     facts = row.facts or {}
-    deadline_at_raw = facts.get("deadline_at")
-    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
-    deadline_precision = facts.get("deadline_precision", "datetime")
-    deadline_timezone = facts.get("deadline_timezone")
+    derived = _derive_facts(facts)
     evaluated_at = datetime.now(UTC)
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
         status_valid_until=row.status_valid_until,
         now=evaluated_at,
     )
     status_detail = evaluate_status_detail(
         status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
-        expected_reopen_month=facts.get("expected_reopen_month"),
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
+        expected_reopen_month=derived.expected_reopen_month,
         now=evaluated_at,
     )
     caveats: list[str] = []
@@ -778,15 +894,35 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         official_url=row.official_cycle_url,
         facts=facts,
         last_verified_at=row.last_verified_at,
-        eligibility_note=facts.get("eligibility_note"),
-        field_names=facts.get("field_names", []),
-        destinations=_result_destinations(facts),
+        eligibility_note=derived.eligibility_note,
+        field_names=derived.field_names,
+        destinations=derived.destinations,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.public_deadline_precision,
+        degree_levels=derived.degree_levels,
+        expected_reopen_month=derived.expected_reopen_month,
+        funding_type=derived.funding_type,
+        provider_country=row.scholarship.provider.country,
         caveats=caveats,
     )
 
 
+def _taxonomy_items(mapping: dict[str, str], key: str, wanted: set[str]) -> list[TaxonomyItem]:
+    if key not in wanted:
+        return []
+    return [TaxonomyItem(code=code, label=label) for code, label in mapping.items()]
+
+
 TAXONOMY_TYPES = frozenset(
-    {"countries", "destinations", "degrees", "fields", "narrow_fields", "award_types"}
+    {
+        "countries",
+        "destinations",
+        "degrees",
+        "fields",
+        "narrow_fields",
+        "award_types",
+        "funding_types",
+    }
 )
 
 
@@ -844,24 +980,11 @@ async def taxonomies(
         ]
         if "destinations" in wanted
         else [],
-        degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()]
-        if "degrees" in wanted
-        else [],
-        fields=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.broad_fields.items()
-        ]
-        if "fields" in wanted
-        else [],
-        narrow_fields=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.narrow_fields.items()
-        ]
-        if "narrow_fields" in wanted
-        else [],
-        award_types=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
-        ]
-        if "award_types" in wanted
-        else [],
+        degrees=_taxonomy_items(TAXONOMY.degrees, "degrees", wanted),
+        fields=_taxonomy_items(TAXONOMY.broad_fields, "fields", wanted),
+        narrow_fields=_taxonomy_items(TAXONOMY.narrow_fields, "narrow_fields", wanted),
+        award_types=_taxonomy_items(TAXONOMY.award_types, "award_types", wanted),
+        funding_types=_taxonomy_items(TAXONOMY.funding_types, "funding_types", wanted),
     )
 
 
@@ -1100,6 +1223,8 @@ async def search(
             search_id=search_id,
             response_id=stored.id,
             evaluated_at=evaluated_at,
+            match_policy_version=MATCH_POLICY_VERSION,
+            taxonomy_version=TAXONOMY.version,
             confirmed_counts=confirmed_counts,
             possible_match_count=sum(item.fit == "possible" for item in matched),
             warnings=warnings,

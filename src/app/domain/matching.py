@@ -27,21 +27,34 @@ def _normalise(value: str) -> str:
     return value.strip().lower()
 
 
+def _normalised_set(facts: dict[str, Any], key: str) -> set[str]:
+    """`facts.get(key, [])` only substitutes the default when the key is
+    absent, not when it's present but explicitly null (or anything else
+    that isn't a list) - facts isn't schema-enforced below `publish()`, and
+    a bare `for v in facts.get(key, [])` over `None` raises TypeError here,
+    in the per-row hard-gate loop every /search request runs - a single
+    corrupted row would 500 the whole response, not just fail to match."""
+    value = facts.get(key)
+    if not isinstance(value, list):
+        return set()
+    return {_normalise(str(v)) for v in value}
+
+
 def evaluate_match(profile: SearchProfile, facts: dict[str, Any]) -> MatchDecision | None:
-    """Apply the V1 hard gates and deterministic match-v1 score."""
-    destinations = {_normalise(str(v)) for v in facts.get("destinations", [])}
+    """Apply the hard gates and deterministic score for the policy version
+    recorded as `MATCH_POLICY_VERSION` in `api/routes.py` - bump that
+    constant whenever this function's gating/scoring semantics change."""
+    destinations = _normalised_set(facts, "destinations")
     if not destinations.intersection({_normalise(v) for v in profile.target_countries}):
         return None
-    if _normalise(profile.program_level) not in {
-        _normalise(str(v)) for v in facts.get("levels", [])
-    }:
+    if _normalise(profile.program_level) not in _normalised_set(facts, "levels"):
         return None
-    origin_mode = facts.get("origin_mode", "unknown")
-    origins = {_normalise(str(v)) for v in facts.get("origins", [])}
+    origin_mode = facts.get("origin_mode") or "unknown"
+    origins = _normalised_set(facts, "origins")
     if origin_mode == "restricted" and _normalise(profile.origin_country) not in origins:
         return None
-    field_mode = facts.get("field_mode", "unknown")
-    fields = {_normalise(str(v)) for v in facts.get("fields", [])}
+    field_mode = facts.get("field_mode") or "unknown"
+    fields = _normalised_set(facts, "fields")
     accepted_fields = (
         {_normalise(v) for v in profile.fields} if profile.fields is not None else None
     )

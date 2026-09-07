@@ -30,6 +30,11 @@ class Taxonomy:
     broad_aliases: dict[str, str]
     degree_aliases: dict[str, str]
     award_types: dict[str, str]
+    #: How much of the cost an award covers - distinct from `award_types`
+    #: (what kind of instrument it is: scholarship/fellowship/grant/...).
+    #: The two vary independently: a scholarship and a fellowship can each
+    #: be fully-funded or partial.
+    funding_types: dict[str, str]
 
     def country(self, value: str) -> str:
         code = value.strip().upper()
@@ -65,15 +70,27 @@ class Taxonomy:
             narrow for narrow, broad in self.narrow_to_broad.items() if broad == broad_code
         )
 
-    def award_type(self, value: str) -> str:
+    def _lookup(self, value: str, table: dict[str, str], label: str) -> str:
         code = value.strip().lower()
-        if code not in self.award_types:
-            raise ValueError("Unsupported award type")
+        if code not in table:
+            raise ValueError(f"Unsupported {label}")
         return code
+
+    def award_type(self, value: str) -> str:
+        return self._lookup(value, self.award_types, "award type")
+
+    def funding_type(self, value: str) -> str:
+        return self._lookup(value, self.funding_types, "funding type")
 
 
 TAXONOMY = Taxonomy(
-    version="taxonomy-v1",
+    # Bump whenever the vocabulary itself changes shape (a code is added,
+    # removed, or renamed), not for every new unrelated taxonomy dimension.
+    # v2 marks the field taxonomy rebuild (2 flat codes -> ISCED-F 2013
+    # 11 broad/29 narrow, commit 68157fd) that shipped without a bump - a
+    # stored Search.taxonomy_version could not previously distinguish a
+    # result evaluated before that rebuild from one evaluated after it.
+    version="taxonomy-v2",
     countries={"NG": "Nigeria", "CA": "Canada", "GB": "United Kingdom", "US": "United States"},
     # Codes are ISCED-aligned to match Core's `degree_levels` slugs, because a
     # join intent forwards this value and Core cannot resolve one it does not
@@ -194,6 +211,12 @@ TAXONOMY = Taxonomy(
         "assistantship": "Assistantship",
         "studentship": "Studentship",
         "grant": "Grant",
+    },
+    funding_types={
+        "fully_funded": "Fully funded",
+        "partial_funding": "Partial funding",
+        "tuition_only": "Tuition only",
+        "stipend_only": "Stipend only",
     },
 )
 

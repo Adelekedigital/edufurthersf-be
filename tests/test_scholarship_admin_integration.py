@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from app.domain.models import Provider, RecordState, Scholarship
+from app.domain.models import Provider, RecordState, Scholarship, ScholarshipCycle
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -179,3 +179,26 @@ async def test_evaluated_public_status_reflects_a_deadline_the_stored_value_has_
     cycle = response.json()["data"][0]["cycles"][0]
     assert cycle["public_status"] == "open_verified"
     assert cycle["evaluated_public_status"] == "status_unknown"
+
+
+async def test_a_malformed_deadline_at_does_not_crash_the_whole_listing(db, client) -> None:
+    """`facts` JSONB is only validated going in through publish() - a row
+    written directly by one of this repo's own one-off admin/backfill
+    scripts could hold a non-ISO deadline_at. That must not 500 the entire
+    admin listing over one corrupted cycle."""
+    scholarship = await _scholarship(db, name="Corrupted Award", slug="corrupted-award")
+    await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "deadline_at": "2026-12-31T00:00:00Z", "deadline_precision": "date"},
+        headers=AUTH,
+    )
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "deadline_at": "not-a-real-date"}
+    db.add(cycle)
+    await db.commit()
+
+    response = await client.get(
+        "/api/v1/internal/admin/scholarships", params={"q": "Corrupted Award"}, headers=AUTH
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"][0]["cycles"][0]["evaluated_public_status"] == "open_verified"

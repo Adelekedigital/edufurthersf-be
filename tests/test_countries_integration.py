@@ -100,6 +100,9 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
     assert {item["code"] for item in body["award_types"]} == {
         "scholarship", "fellowship", "assistantship", "studentship", "grant",
     }
+    assert {item["code"] for item in body["funding_types"]} == {
+        "fully_funded", "partial_funding", "tuition_only", "stipend_only",
+    }
 
 
 async def test_taxonomies_types_filters_to_requested_collections_only(db, client) -> None:

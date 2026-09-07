@@ -23,6 +23,8 @@ class TaxonomiesResponse(BaseModel):
     #: tagged with at publish time; not a search filter itself.
     narrow_fields: list[TaxonomyItem]
     award_types: list[TaxonomyItem]
+    #: How much of the cost an award covers - distinct from `award_types`.
+    funding_types: list[TaxonomyItem]
 
 
 class SearchRequest(BaseModel):
@@ -74,6 +76,30 @@ class SearchResult(BaseModel):
     #: target several countries at once, and which one(s) this specific award
     #: actually covers is a fact about the award, not about the query.
     destinations: list[str] = Field(default_factory=list)
+    #: Null when this award has no fixed deadline (rolling, or not yet set).
+    deadline_at: datetime | None = None
+    #: Whether `deadline_at` is evidenced down to the minute or only the day
+    #: - render "by 12 Sep 2026" for `"date"`, not a fabricated time of day.
+    #: Meaningless (and always omitted from `facts`) when `deadline_at` is
+    #: null.
+    deadline_precision: Literal["date", "datetime"] | None = None
+    #: TAXONOMY.degrees codes this cycle accepts, from `facts["levels"]` -
+    #: not to be confused with `field`/`fields`, which is subject not level.
+    degree_levels: list[str] = Field(default_factory=list)
+    #: A cyclic month number (1-12), never a year - the source rarely commits
+    #: to a specific year for "reopens around February." Pair with
+    #: `status_detail == "opening_soon"`/`"likely_to_reopen"` for copy; null
+    #: means no such evidence exists, not "unknown year."
+    expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
+    #: One of `GET /taxonomies` `funding_types`, or null when the reviewer
+    #: had no evidence of coverage level. Distinct from `award_type` - see
+    #: that field's own note.
+    funding_type: str | None = None
+    #: Where the *provider* institution/organization is based - a fact about
+    #: the provider, not this award's study destination (see
+    #: `destinations`). Null for a provider registered before this existed;
+    #: never guessed from `destinations`.
+    provider_country: str | None = None
     caveats: list[str] = Field(default_factory=list)
 
 
@@ -83,8 +109,13 @@ class SearchMeta(BaseModel):
     # tied to what was actually shown rather than to the search as a whole.
     response_id: uuid.UUID
     evaluated_at: datetime
-    match_policy_version: str = "match-v1"
-    taxonomy_version: str = "taxonomy-v1"
+    #: No default - deliberately required. The one construction site is
+    #: expected to pass MATCH_POLICY_VERSION/TAXONOMY.version explicitly, the
+    #: same source of truth used for the stored Search row and the analytics
+    #: event; a silently-matching default here previously let those three
+    #: copies drift out of sync with no test to catch it.
+    match_policy_version: str
+    taxonomy_version: str
     confirmed_counts: dict[str, int]
     possible_match_count: int
     warnings: list[str] = Field(default_factory=list)

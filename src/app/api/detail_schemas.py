@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -37,6 +38,17 @@ class ScholarshipDetailResponse(BaseModel):
     #: See `SearchResult.destinations` - this award's own destination
     #: code(s), not to be inferred from a search filter.
     destinations: list[str] = Field(default_factory=list)
+    #: See `SearchResult.deadline_at`/`.deadline_precision`.
+    deadline_at: datetime | None = None
+    deadline_precision: Literal["date", "datetime"] | None = None
+    #: See `SearchResult.degree_levels`.
+    degree_levels: list[str] = Field(default_factory=list)
+    #: See `SearchResult.expected_reopen_month`.
+    expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
+    #: See `SearchResult.funding_type`.
+    funding_type: str | None = None
+    #: See `SearchResult.provider_country`.
+    provider_country: str | None = None
     caveats: list[str] = Field(default_factory=list)
     #: AI Router elaboration on this searcher's deterministic match decision
     #: - only ever set by `POST` with a profile; a bare `GET` (no profile,

@@ -74,6 +74,28 @@ def test_no_field_preference_never_excludes_a_field_restricted_record() -> None:
     assert "field_compatible" not in decision.reason_codes
 
 
+def test_explicit_null_facts_values_degrade_to_no_match_not_a_crash() -> None:
+    """`facts.get(key, [])` only substitutes the default when the key is
+    absent, not when it's present but explicitly null - a bare `for v in
+    None` used to raise TypeError here, in the per-row hard-gate loop
+    every /search request runs, crashing the whole response over one
+    corrupted row rather than just excluding it."""
+    assert (
+        evaluate_match(
+            profile(),
+            {
+                "destinations": None,
+                "levels": None,
+                "origin_mode": None,
+                "origins": None,
+                "field_mode": None,
+                "fields": None,
+            },
+        )
+        is None
+    )
+
+
 def test_a_narrow_tag_outside_the_searched_broad_bucket_is_excluded() -> None:
     """Searching the broad "ict" field must not match a scholarship tagged
     with a narrow field from an unrelated broad bucket."""

@@ -12,6 +12,10 @@ class ProviderCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     approved_domains: list[str] = Field(min_length=1, max_length=50)
+    #: Where this institution/organization is based - any real country Core
+    #: publishes (not limited to the destinations Finder covers; a provider
+    #: can be based anywhere). Omit when unknown - never guessed.
+    country: str | None = Field(default=None, min_length=2, max_length=3)
 
     @field_validator("approved_domains")
     @classmethod
@@ -23,6 +27,7 @@ class ProviderRead(BaseModel):
     provider_id: uuid.UUID
     name: str
     approved_domains: list[str]
+    country: str | None = None
 
 
 class ProviderListResponse(BaseModel):

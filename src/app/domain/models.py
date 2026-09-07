@@ -52,6 +52,11 @@ class Provider(TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255))
     approved_domains: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    #: Where this institution/organization is based - a fact about the
+    #: provider, not about any one award it funds (an award's own study
+    #: destination lives on the cycle, see ScholarshipCycle.facts). Nullable:
+    #: unknown for a provider registered before this existed, never guessed.
+    country: Mapped[str | None] = mapped_column(String(3), nullable=True)
 
 
 class Scholarship(TimestampMixin, Base):
@@ -445,9 +450,9 @@ class Search(TimestampMixin, Base):
     filter_digest: Mapped[str] = mapped_column(String(128))
     filters: Mapped[dict] = mapped_column(JSONB, default=dict)
     result_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
-    snapshot_schema_version: Mapped[str] = mapped_column(String(20), default="snapshot-v1")
-    match_policy_version: Mapped[str] = mapped_column(String(50), default="match-v1")
-    taxonomy_version: Mapped[str] = mapped_column(String(50), default="taxonomy-v1")
+    snapshot_schema_version: Mapped[str] = mapped_column(String(20), default="snapshot-v2")
+    match_policy_version: Mapped[str] = mapped_column(String(50), default="match-v2")
+    taxonomy_version: Mapped[str] = mapped_column(String(50), default="taxonomy-v2")
     page_number: Mapped[int] = mapped_column(Integer, default=1)
     requested_limit: Mapped[int] = mapped_column(Integer, default=20)
     returned_count: Mapped[int] = mapped_column(Integer, default=0)
