@@ -139,6 +139,42 @@ async def test_a_non_matching_profile_never_calls_the_router(db, client, monkeyp
     assert called is False
 
 
+async def test_the_match_decision_uses_the_same_sanitized_facts_the_response_shows(
+    db, client, monkeypatch
+) -> None:
+    """A cycle whose facts["origin_mode"] was written outside publish() as
+    something other than exactly "restricted"/"unrestricted"/"unknown"
+    (e.g. wrong case) must not have its match decision computed from that
+    raw value while the response's own facts.origin_mode shows the
+    sanitized "unknown" - fit="confirmed" next to facts.origin_mode:
+    "unknown" would be a self-contradictory response."""
+    cycle = await _publish(db)
+    cycle.facts = {**cycle.facts, "origin_mode": "Restricted", "origins": ["NG"]}
+    db.add(cycle)
+    await db.commit()
+
+    captured_fit = None
+
+    async def _fake_get_match_explanation(*args, decision, **kwargs):
+        nonlocal captured_fit
+        captured_fit = decision.fit
+        return None
+
+    monkeypatch.setattr("app.api.routes.get_match_explanation", _fake_get_match_explanation)
+
+    # An origin that is NOT in origins=["NG"] - a real "restricted" gate
+    # would exclude this profile outright (decision=None). The corrupted,
+    # unrecognized "Restricted" value must sanitize to "unknown" rather
+    # than silently failing open into an unqualified "confirmed" match.
+    response = await client.post(
+        f"/api/v1/scholarships/{cycle.scholarship_id}",
+        json={**PROFILE, "origin_country": "US"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["facts"]["origin_mode"] == "unknown"
+    assert captured_fit == "possible"
+
+
 async def test_a_matching_profile_gets_and_caches_an_explanation(db, client, monkeypatch) -> None:
     cycle = await _publish(db)
     monkeypatch.setattr(
