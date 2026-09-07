@@ -169,8 +169,9 @@ DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
 ```
 
 For staging and production, set secrets in the deployment platform rather than in
-the repository. Core join intent and Sentry are optional integrations and may remain
-unset until those integrations are activated.
+the repository. Core join intent, Sentry and PostHog are optional integrations and
+may remain unset until those integrations are activated — see the dedicated
+subsections below for exactly what each needs.
 
 ### QStash
 
@@ -288,6 +289,121 @@ session cookie: an anonymous caller chooses that value and could mint a fresh
 bucket per request. Suitable for local development or a single API instance;
 before running multiple instances, use a platform-level limiter or a shared store. Before running multiple instances, use a
 Railway/platform-level limiter or replace it with a shared-store implementation.
+
+### Sentry
+
+Error tracking is fully implemented (`app/core/sentry.py`) — `sentry_sdk.init()`,
+a `before_send` scrubber that strips `Authorization`/`Cookie`/`X-Service-Token`/
+`Upstash-Signature` and any other header matching a secret-shaped substring, plus
+direct email addresses, and `include_local_variables=False` so a captured frame
+never leaks a signing-key comparison. `send_default_pii` stays `False` — do not
+change this to match a generic Sentry quickstart snippet; the custom scrubber
+above is deliberately more conservative. Nothing here needs code changes to
+activate, only configuration:
+
+- `SENTRY_DSN` — unset by default (Sentry stays off regardless of everything
+  below). Set the real DSN from the Sentry project as a Railway secret, never
+  committed to the repository.
+- `SENTRY_ENABLED` — tri-state, defaults unset. Unset means "follow
+  `is_deployed`": on for `staging`/`production`, off for local development. Set
+  explicitly (`true`/`false`) only to override that default independent of
+  whether `SENTRY_DSN` happens to be set — e.g. to force it off temporarily
+  without removing the DSN.
+- `SENTRY_TRACES_SAMPLE_RATE` — defaults to `0.0` (errors only, no performance
+  traces). Optional.
+
+To verify after setting `SENTRY_DSN`, trigger a controlled exception without
+adding a permanent debug endpoint to the API:
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python -c "from app.core.config import get_settings; from app.core.sentry import initialize_sentry; import sentry_sdk; s = get_settings(); initialize_sentry(s.sentry_dsn, s.environment, s.app_version, s.sentry_traces_sample_rate); sentry_sdk.capture_exception(RuntimeError('sentry verification test'))"
+```
+
+Then confirm in the Sentry dashboard that the event carries `request_id`/
+environment/release, and does **not** carry any `Authorization`/`Cookie`/
+`X-Service-Token`/`Upstash-Signature` header value or a raw email address.
+
+### PostHog dispatch
+
+Product/feature analytics events are written durably to the `outbox_events`
+table in the same transaction as the business change they describe
+(`app/infra/outbox.py`) and dispatched later, out of the request path.
+Connecting a real PostHog project needs one secret and, once, a schedule:
+
+- `POSTHOG_API_KEY` — unset by default. Until it is set, `dispatch_outbox`
+  keeps claiming and holding pending events without sending them — the exact
+  same safe no-op as today, so this is safe to leave unset indefinitely.
+- `POSTHOG_HOST` — defaults to `https://us.i.posthog.com`. Only set if the
+  project lives in a different PostHog region.
+- `POSTHOG_DISPATCH_ENABLED` — tri-state, same `is_deployed` default pattern
+  as `SENTRY_ENABLED` above. Both this **and** `POSTHOG_API_KEY` must be
+  satisfied before anything is actually sent, so local development never
+  dispatches even if a key is configured somewhere shared.
+
+Once `POSTHOG_API_KEY` is set, create the schedule that actually triggers
+dispatch — nothing does until this runs:
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_dispatch_outbox_schedule.py create `
+  --base-url https://your-staging-url --cron "*/2 * * * *"
+```
+
+No custom dedupe scheme is needed here (unlike the freshness jobs below):
+claiming pending events is already idempotent (`SKIP LOCKED`, no-ops when
+nothing is pending), so a fixed cron is sufficient.
+
+### Proactive freshness sweep (`refresh_status`, `reverify_due`)
+
+Two recurring jobs keep a published cycle's status and evidence current
+without waiting for a searcher to hit the read-time fallback:
+`refresh_status` re-evaluates `public_status` from already-stored facts (no
+network call); `reverify_due` re-fetches each due cycle's official page and
+compares its content hash to the last known one, per the data-verification
+standard's cadence table. Every cadence value
+(`FRESHNESS_OPEN_FAR_FETCH_HOURS`, `FRESHNESS_OPEN_NEAR_MAX_AGE_HOURS`,
+`REFRESH_STATUS_BATCH_LIMIT`, and so on — see `Settings` in
+`app/core/config.py` for the complete list) has a working default matching
+that table; none need to be set to activate this feature, only to tune it.
+
+Two one-time steps are required before `reverify_due` can do anything useful,
+and neither is a code change:
+
+1. **Apply migrations `0021`/`0022`** via the manually triggered `Database
+   migrations` GitHub Actions workflow (see "Database migrations" above) —
+   without these, `scholarship_cycles.source_page_id`,
+   `scholarship_cycles.auto_downgraded` and `review_tasks.cycle_id` do not
+   exist yet.
+2. **Create the source `reverify_due` attaches every reverified page to.**
+   Idempotent — safe to run again, it just confirms the row already exists:
+
+   ```powershell
+   railway run -s edufurthersf-be -e development -- `
+     uv run python scripts/create_official_cycle_source.py `
+     --base-url https://your-staging-url
+   ```
+
+Then create both QStash schedules — nothing enqueues either job kind until
+these exist:
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_freshness_schedules.py create --kind refresh_status `
+  --base-url https://your-staging-url --cron "*/15 * * * *"
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_freshness_schedules.py create --kind reverify_due `
+  --base-url https://your-staging-url --cron "*/15 * * * *"
+```
+
+`status`/`pause`/`resume`/`delete` work the same way as
+`manage_parsebot_schedule.py` above (`status` needs no `--schedule-id`;
+the others do). **Expect a one-time rollout burst**: the first tick after
+creation touches every already-published cycle — tell whoever owns the
+review queue before running the `create` commands in production, the same
+"reviewer overloaded after launch" risk the project's own implementation
+plan already names for the initial dataset.
 
 ## Taxonomy and Core alignment
 
