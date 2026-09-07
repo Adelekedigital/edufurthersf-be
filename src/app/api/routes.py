@@ -487,6 +487,13 @@ async def bulk_review_decision(
     return BulkReviewDecisionResponse(results=results)
 
 
+def _result_destinations(facts: dict) -> list[str]:
+    """`build_cycle_facts` already dedupes/sorts this at write time - this
+    re-normalizes anyway so the two read sites can't silently drift apart on
+    how they handle it."""
+    return sorted({str(v) for v in facts.get("destinations", [])})
+
+
 def _search_result(
     row: ScholarshipCycle, decision: MatchDecision, evaluated_at: datetime
 ) -> SearchResult:
@@ -535,7 +542,7 @@ def _search_result(
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
-        destinations=sorted({str(v) for v in facts.get("destinations", [])}),
+        destinations=_result_destinations(facts),
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -773,7 +780,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         last_verified_at=row.last_verified_at,
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
-        destinations=sorted({str(v) for v in facts.get("destinations", [])}),
+        destinations=_result_destinations(facts),
         caveats=caveats,
     )
 

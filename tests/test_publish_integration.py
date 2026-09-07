@@ -222,7 +222,10 @@ async def test_a_result_carries_its_own_destination_not_the_search_filter(db, cl
     )
     assert response.status_code == 200, response.text
 
-    multi_country_search = {**SEARCH, "target_countries": ["CA", "GB"]}
+    # GB listed first, deliberately - the award's real destination is CA. If
+    # this ever regressed back to reading target_countries[0] instead of the
+    # award's own facts, GB-first would catch it; CA-first would not.
+    multi_country_search = {**SEARCH, "target_countries": ["GB", "CA"]}
     results = (await client.post("/api/v1/search", json=multi_country_search)).json()["data"]
     assert results[0]["destinations"] == ["CA"]
 
