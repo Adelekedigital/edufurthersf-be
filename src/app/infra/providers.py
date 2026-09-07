@@ -6,17 +6,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.provider_schemas import ProviderCreateRequest
+from app.domain.countries import CountryVocabulary
 from app.domain.models import Provider
-from app.infra.countries import load_vocabulary
 
 
-async def create_provider(db: AsyncSession, request: ProviderCreateRequest) -> Provider:
-    country = None
-    if request.country is not None:
-        # Any real country Core publishes, same vocabulary as a searcher's
-        # origin - a provider is not limited to Finder's covered destinations.
-        vocabulary = await load_vocabulary(db)
-        country = vocabulary.origin(request.country)
+async def create_provider(
+    db: AsyncSession, request: ProviderCreateRequest, *, countries: CountryVocabulary
+) -> Provider:
+    # Any real country Core publishes, same vocabulary as a searcher's
+    # origin - a provider is not limited to Finder's covered destinations.
+    country = countries.origin(request.country) if request.country is not None else None
     provider = Provider(
         name=request.name, approved_domains=request.approved_domains, country=country
     )

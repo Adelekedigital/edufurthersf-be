@@ -70,17 +70,17 @@ class Taxonomy:
             narrow for narrow, broad in self.narrow_to_broad.items() if broad == broad_code
         )
 
-    def award_type(self, value: str) -> str:
+    def _lookup(self, value: str, table: dict[str, str], label: str) -> str:
         code = value.strip().lower()
-        if code not in self.award_types:
-            raise ValueError("Unsupported award type")
+        if code not in table:
+            raise ValueError(f"Unsupported {label}")
         return code
 
+    def award_type(self, value: str) -> str:
+        return self._lookup(value, self.award_types, "award type")
+
     def funding_type(self, value: str) -> str:
-        code = value.strip().lower()
-        if code not in self.funding_types:
-            raise ValueError("Unsupported funding type")
-        return code
+        return self._lookup(value, self.funding_types, "funding type")
 
 
 TAXONOMY = Taxonomy(

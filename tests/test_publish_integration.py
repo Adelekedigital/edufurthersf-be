@@ -6,7 +6,14 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from app.domain.models import AuditLog, OutboxEvent, Provider, RecordState, Scholarship
+from app.domain.models import (
+    AuditLog,
+    OutboxEvent,
+    Provider,
+    RecordState,
+    Scholarship,
+    ScholarshipCycle,
+)
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -258,6 +265,48 @@ async def test_search_result_exposes_deadline_and_degree_levels(db, client) -> N
     assert result["deadline_precision"] == "date"
     assert result["degree_levels"] == ["masters"]
     assert result["expected_reopen_month"] is None
+
+    # The detail endpoint carries the same fields, not just search - a
+    # frontend building a detail page shouldn't need to parse `facts` for
+    # data the search card already gets as first-class fields.
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["deadline_at"].startswith("2026-12-31")
+    assert detail["deadline_precision"] == "date"
+    assert detail["degree_levels"] == ["masters"]
+
+
+async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
+    db, client
+) -> None:
+    """`facts` JSONB is only validated going in through publish() - a row
+    written directly by one of this repo's own one-off admin/backfill
+    scripts could hold a value outside deadline_precision's/
+    expected_reopen_month's contract. That must degrade the one field to
+    null, never 500 the entire /search response over one bad row."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "deadline_at": "2026-12-31T00:00:00Z", "deadline_precision": "date"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "deadline_precision": "fortnight", "expected_reopen_month": 13}
+    db.add(cycle)
+    await db.commit()
+
+    search_response = await client.post("/api/v1/search", json=SEARCH)
+    assert search_response.status_code == 200, search_response.text
+    result = search_response.json()["data"][0]
+    assert result["deadline_precision"] is None
+    assert result["expected_reopen_month"] is None
+
+    detail_response = await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")
+    assert detail_response.status_code == 200, detail_response.text
+    detail = detail_response.json()
+    assert detail["deadline_precision"] is None
+    assert detail["expected_reopen_month"] is None
 
 
 async def test_search_result_exposes_expected_reopen_month_not_a_deadline(db, client) -> None:

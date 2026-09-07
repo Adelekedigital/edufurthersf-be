@@ -4,7 +4,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -205,8 +205,9 @@ def _provider_read(provider: Provider) -> ProviderRead:
 async def create_provider_route(
     payload: ProviderCreateRequest, db: AsyncSession = Depends(get_db)
 ) -> ProviderRead:
+    countries = await load_vocabulary(db)
     try:
-        provider = await create_provider(db, payload)
+        provider = await create_provider(db, payload, countries=countries)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _provider_read(provider)
@@ -502,6 +503,20 @@ def _result_destinations(facts: dict) -> list[str]:
     return sorted({str(v) for v in facts.get("destinations", [])})
 
 
+def _valid_deadline_precision(value: Any) -> Literal["date", "datetime"] | None:
+    """`facts` JSONB isn't schema-enforced at the DB level - only the
+    `publish()` endpoint validates it going in. A row written by a one-off
+    admin/backfill script (this repo has several) with a value outside the
+    contract must degrade this one field to null, not raise
+    pydantic.ValidationError building SearchResult and 500 the whole
+    /search response for every caller over one bad row."""
+    return value if value in ("date", "datetime") else None
+
+
+def _valid_reopen_month(value: Any) -> int | None:
+    return value if isinstance(value, int) and 1 <= value <= 12 else None
+
+
 def _search_result(
     row: ScholarshipCycle, decision: MatchDecision, evaluated_at: datetime
 ) -> SearchResult:
@@ -552,9 +567,9 @@ def _search_result(
         field_names=facts.get("field_names", []),
         destinations=_result_destinations(facts),
         deadline_at=deadline_at,
-        deadline_precision=deadline_precision if deadline_at else None,
+        deadline_precision=_valid_deadline_precision(deadline_precision) if deadline_at else None,
         degree_levels=facts.get("levels", []),
-        expected_reopen_month=facts.get("expected_reopen_month"),
+        expected_reopen_month=_valid_reopen_month(facts.get("expected_reopen_month")),
         funding_type=facts.get("funding_type"),
         provider_country=row.scholarship.provider.country
         if row.scholarship and row.scholarship.provider
@@ -798,10 +813,20 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
         destinations=_result_destinations(facts),
+        deadline_at=deadline_at,
+        deadline_precision=_valid_deadline_precision(deadline_precision) if deadline_at else None,
+        degree_levels=facts.get("levels", []),
+        expected_reopen_month=_valid_reopen_month(facts.get("expected_reopen_month")),
         funding_type=facts.get("funding_type"),
         provider_country=row.scholarship.provider.country,
         caveats=caveats,
     )
+
+
+def _taxonomy_items(mapping: dict[str, str], key: str, wanted: set[str]) -> list[TaxonomyItem]:
+    if key not in wanted:
+        return []
+    return [TaxonomyItem(code=code, label=label) for code, label in mapping.items()]
 
 
 TAXONOMY_TYPES = frozenset(
@@ -871,29 +896,11 @@ async def taxonomies(
         ]
         if "destinations" in wanted
         else [],
-        degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()]
-        if "degrees" in wanted
-        else [],
-        fields=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.broad_fields.items()
-        ]
-        if "fields" in wanted
-        else [],
-        narrow_fields=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.narrow_fields.items()
-        ]
-        if "narrow_fields" in wanted
-        else [],
-        award_types=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
-        ]
-        if "award_types" in wanted
-        else [],
-        funding_types=[
-            TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.funding_types.items()
-        ]
-        if "funding_types" in wanted
-        else [],
+        degrees=_taxonomy_items(TAXONOMY.degrees, "degrees", wanted),
+        fields=_taxonomy_items(TAXONOMY.broad_fields, "fields", wanted),
+        narrow_fields=_taxonomy_items(TAXONOMY.narrow_fields, "narrow_fields", wanted),
+        award_types=_taxonomy_items(TAXONOMY.award_types, "award_types", wanted),
+        funding_types=_taxonomy_items(TAXONOMY.funding_types, "funding_types", wanted),
     )
 
 
@@ -1132,6 +1139,8 @@ async def search(
             search_id=search_id,
             response_id=stored.id,
             evaluated_at=evaluated_at,
+            match_policy_version=MATCH_POLICY_VERSION,
+            taxonomy_version=TAXONOMY.version,
             confirmed_counts=confirmed_counts,
             possible_match_count=sum(item.fit == "possible" for item in matched),
             warnings=warnings,

@@ -109,8 +109,13 @@ class SearchMeta(BaseModel):
     # tied to what was actually shown rather than to the search as a whole.
     response_id: uuid.UUID
     evaluated_at: datetime
-    match_policy_version: str = "match-v2"
-    taxonomy_version: str = "taxonomy-v2"
+    #: No default - deliberately required. The one construction site is
+    #: expected to pass MATCH_POLICY_VERSION/TAXONOMY.version explicitly, the
+    #: same source of truth used for the stored Search row and the analytics
+    #: event; a silently-matching default here previously let those three
+    #: copies drift out of sync with no test to catch it.
+    match_policy_version: str
+    taxonomy_version: str
     confirmed_counts: dict[str, int]
     possible_match_count: int
     warnings: list[str] = Field(default_factory=list)

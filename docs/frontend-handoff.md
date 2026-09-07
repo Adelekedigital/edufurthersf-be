@@ -59,7 +59,7 @@ The vocabularies a search form is built from:
 
 ```jsonc
 {
-  "version": "taxonomy-v1",
+  "version": "taxonomy-v2",
   "countries": [{ "code": "NG", "label": "Nigeria" }, ...],   // any origin
   "destinations": [{ "code": "CA", "label": "Canada" }, ...], // verified-coverage subset of countries
   "degrees": [{ "code": "masters", "label": "Master's" }, { "code": "doctorate", "label": "PhD" }],
@@ -81,8 +81,8 @@ collections; every other key comes back as `[]`, not omitted, so the shape
 never changes. Omitting `types`, or sending it empty (`?types=`), both mean
 "no filter" and return the full vocabulary - same result either way. Valid
 values: `countries`, `destinations`, `degrees`, `fields`, `narrow_fields`,
-`award_types`. An actual unrecognized value (e.g. `?types=bogus`) is a
-`422`.
+`award_types`, `funding_types`. An actual unrecognized value (e.g.
+`?types=bogus`) is a `422`.
 
 If your HTTP client serializes arrays with a bracket suffix
 (`types[]=fields`) rather than FastAPI's plain repeated-key form, that's
@@ -130,7 +130,7 @@ back to the full vocabulary when populated.
   "next_cursor": "...",  // null when there's no next page
   "meta": {
     "search_id": "...", "response_id": "...", "evaluated_at": "...",
-    "match_policy_version": "match-v1", "taxonomy_version": "taxonomy-v1",
+    "match_policy_version": "match-v2", "taxonomy_version": "taxonomy-v2",
     "confirmed_counts": { "...": 0 },
     "possible_match_count": 0,
     "warnings": ["no_verified_coverage:FR,DE"]

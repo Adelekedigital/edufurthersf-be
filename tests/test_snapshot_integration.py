@@ -38,6 +38,11 @@ async def test_the_returned_page_is_stored(db, client) -> None:
     # allowlist exists to make visible rather than let happen quietly.
     assert snapshot["data"][0]["destinations"] == ["CA"]
     assert snapshot["meta"]["excluded_fields"] == []
+    # The live response must report the same versions as the stored row -
+    # SearchMeta has no default to silently fall back on if the route ever
+    # forgets to pass these explicitly.
+    assert body["meta"]["taxonomy_version"] == "taxonomy-v2"
+    assert body["meta"]["match_policy_version"] == "match-v2"
 
 
 async def test_a_zero_result_search_is_recorded_as_a_success(db, client) -> None:
