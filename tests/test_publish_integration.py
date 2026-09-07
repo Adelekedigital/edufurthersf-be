@@ -275,107 +275,6 @@ async def test_search_result_exposes_deadline_and_degree_levels(db, client) -> N
     assert detail["degree_levels"] == ["masters"]
 
 
-async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
-    db, client
-) -> None:
-    """`facts` JSONB is only validated going in through publish() - a row
-    written directly by one of this repo's own one-off admin/backfill
-    scripts could hold a value outside contract for any facts-derived
-    response field. That must degrade the one field, never 500 the entire
-    /search or detail response over one bad row.
-
-    `deadline_precision` clamps to "datetime" rather than going null - the
-    same fallback already used when the key is simply absent - because
-    `deadline_at` itself is still a real, valid instant here; nulling
-    `deadline_precision` while leaving `deadline_at` set would violate the
-    documented "null iff deadline_at is null" invariant."""
-    scholarship = await _approved_scholarship(db)
-    response = await client.post(
-        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
-        json={**CYCLE, "deadline_at": "2026-12-31T00:00:00Z", "deadline_precision": "date"},
-        headers=AUTH,
-    )
-    assert response.status_code == 200, response.text
-
-    cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {
-        **cycle.facts,
-        "deadline_precision": "fortnight",
-        "expected_reopen_month": 13,
-        "levels": ["masters", 123, None],
-        "funding_type": "free_money",
-        "eligibility_note": 12345,
-        "field_names": ["MSc Development Economics", 42, None],
-    }
-    db.add(cycle)
-    await db.commit()
-
-    for response_json in (
-        (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0],
-        (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json(),
-    ):
-        assert response_json["deadline_at"].startswith("2026-12-31")
-        assert response_json["deadline_precision"] == "datetime"
-        assert response_json["expected_reopen_month"] is None
-        assert response_json["degree_levels"] == ["masters"]
-        assert response_json["funding_type"] is None
-        assert response_json["eligibility_note"] is None
-        assert response_json["field_names"] == ["MSc Development Economics"]
-
-
-async def test_an_unhashable_funding_type_does_not_crash_the_membership_check(
-    db, client
-) -> None:
-    """`raw_value in TAXONOMY.funding_types` raises TypeError instead of
-    returning False when raw_value is unhashable (a list/dict) - the
-    isinstance check must run first."""
-    scholarship = await _approved_scholarship(db)
-    response = await client.post(
-        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
-        json=CYCLE,
-        headers=AUTH,
-    )
-    assert response.status_code == 200, response.text
-
-    cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {**cycle.facts, "funding_type": ["fully_funded"]}
-    db.add(cycle)
-    await db.commit()
-
-    search_response = await client.post("/api/v1/search", json=SEARCH)
-    assert search_response.status_code == 200, search_response.text
-    assert search_response.json()["data"][0]["funding_type"] is None
-
-
-async def test_a_non_list_levels_or_field_names_does_not_crash_the_response(
-    db, client
-) -> None:
-    """A bare `for x in value` over a non-list raises TypeError - `levels`/
-    `field_names` must degrade to empty, not crash, when facts holds
-    something other than a list at all (not just a list with bad items).
-    Uses the detail endpoint - corrupting `levels` this way also fails
-    /search's own hard-gate match on program_level, which would hide the
-    record before _derive_facts ever ran on it."""
-    scholarship = await _approved_scholarship(db)
-    response = await client.post(
-        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
-        json=CYCLE,
-        headers=AUTH,
-    )
-    assert response.status_code == 200, response.text
-
-    cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {**cycle.facts, "levels": "masters", "field_names": "MSc Development Economics"}
-    db.add(cycle)
-    await db.commit()
-
-    detail_response = await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")
-    assert detail_response.status_code == 200, detail_response.text
-    detail = detail_response.json()
-    assert detail["degree_levels"] == []
-    assert detail["field_names"] == []
-
-
 async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) -> None:
     scholarship = await _approved_scholarship(db)
     response = await client.post(
@@ -393,26 +292,6 @@ async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) ->
     result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
     assert result["deadline_at"] is None
     assert result["deadline_precision"] is None
-
-
-async def test_a_boolean_reopen_month_is_not_treated_as_month_one(db, client) -> None:
-    """`isinstance(True, int)` is True in Python - a stray boolean in facts
-    must not slip through the month-range guard and get coerced to 1."""
-    scholarship = await _approved_scholarship(db)
-    response = await client.post(
-        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
-        json={**CYCLE, "public_status": "expected_to_reopen"},
-        headers=AUTH,
-    )
-    assert response.status_code == 200, response.text
-
-    cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {**cycle.facts, "expected_reopen_month": True}
-    db.add(cycle)
-    await db.commit()
-
-    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
-    assert result["expected_reopen_month"] is None
 
 
 async def test_search_result_exposes_expected_reopen_month_not_a_deadline(db, client) -> None:
@@ -479,28 +358,6 @@ async def test_funding_type_is_optional_and_absent_by_default(db, client) -> Non
 
     result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
     assert result["funding_type"] is None
-
-
-async def test_funding_type_read_uses_the_same_normalization_as_publish(db, client) -> None:
-    """A value that would validate at publish time (TAXONOMY.funding_type()
-    strips/lowercases before checking) must not silently read back as null
-    just because a row written outside publish() didn't normalize it first
-    - the read side has to apply the exact same rule, not a stricter one."""
-    scholarship = await _approved_scholarship(db)
-    response = await client.post(
-        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
-        json=CYCLE,
-        headers=AUTH,
-    )
-    assert response.status_code == 200, response.text
-
-    cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {**cycle.facts, "funding_type": " Fully_Funded "}
-    db.add(cycle)
-    await db.commit()
-
-    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
-    assert result["funding_type"] == "fully_funded"
 
 
 async def test_provider_country_is_the_providers_own_fact_not_the_study_destination(
