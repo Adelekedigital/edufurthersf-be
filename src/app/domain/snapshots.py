@@ -87,35 +87,32 @@ def build_result_snapshot(
     this only stores what it's given rather than trying to re-derive them
     from `results` later (which would silently undercount once a search has
     more than one page). Optional so a caller with nothing to report - there
-    is only one today - doesn't have to pass them; omitted (not `{}`/`0`)
-    from the stored `meta` when absent, so a later reader can tell "not
-    captured" apart from "captured as zero."
+    is only one today - doesn't have to pass them; every reader treats a
+    `None` value here the same as the key being absent, so this stores
+    `None` rather than omitting the key.
     """
     data = [
         {key: _plain(value) for key, value in result.items() if key in ALLOWED_RESULT_KEYS}
         for result in results
     ]
     rejected = sorted({key for result in results for key in result} - ALLOWED_RESULT_KEYS)
-    meta: dict[str, Any] = {
-        "evaluated_at": evaluated_at.isoformat(),
-        "match_policy_version": match_policy_version,
-        "taxonomy_version": taxonomy_version,
-        # The complete matching set, distinct from what this page returned.
-        "total_match_count": total_match_count,
-        "returned_count": len(data),
-        "warnings": list(warnings),
-        # Named rather than silently dropped, so an unlisted field is
-        # visible as a decision instead of looking like data loss.
-        "excluded_fields": rejected,
-    }
-    if confirmed_counts is not None:
-        meta["confirmed_counts"] = confirmed_counts
-    if possible_match_count is not None:
-        meta["possible_match_count"] = possible_match_count
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "data": data,
-        "meta": meta,
+        "meta": {
+            "evaluated_at": evaluated_at.isoformat(),
+            "match_policy_version": match_policy_version,
+            "taxonomy_version": taxonomy_version,
+            # The complete matching set, distinct from what this page returned.
+            "total_match_count": total_match_count,
+            "returned_count": len(data),
+            "warnings": list(warnings),
+            # Named rather than silently dropped, so an unlisted field is
+            # visible as a decision instead of looking like data loss.
+            "excluded_fields": rejected,
+            "confirmed_counts": confirmed_counts,
+            "possible_match_count": possible_match_count,
+        },
         "pagination": {
             "page_number": page_number,
             "requested_limit": requested_limit,

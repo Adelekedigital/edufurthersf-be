@@ -116,13 +116,33 @@ class SearchMeta(BaseModel):
     #: copies drift out of sync with no test to catch it.
     match_policy_version: str
     taxonomy_version: str
-    #: Never null on a live POST /search response - that path always
-    #: aggregates these fresh from the whole matched set. Null only when
-    #: replaying (GET /search/{search_id}) a search stored before this pair
-    #: started being persisted in build_result_snapshot's meta.
-    confirmed_counts: dict[str, int] | None
-    possible_match_count: int | None
+    #: Still deliberately required here - POST /search always aggregates
+    #: these fresh from the whole matched set, so widening this base type to
+    #: Optional would let a frontend client generated from POST's own schema
+    #: null-check something that can never actually be null on that endpoint,
+    #: and would let a future POST-handler bug that forgets to set them pass
+    #: validation silently instead of failing loudly. GET /search/{search_id}
+    #: (which *can* legitimately have neither, replaying a search stored
+    #: before this pair started being persisted) uses ReplaySearchMeta below
+    #: instead of widening this shared type.
+    confirmed_counts: dict[str, int]
+    possible_match_count: int
     warnings: list[str] = Field(default_factory=list)
+
+
+class ReplaySearchMeta(SearchMeta):
+    """`SearchMeta` with `confirmed_counts`/`possible_match_count` widened to
+    optional - only `GET /search/{search_id}` can legitimately have neither,
+    replaying a search stored before this pair started being persisted.
+
+    mypy flags widening a field's type in a subclass as an LSP violation
+    (a `SearchMeta`-typed reference could statically expect a non-None
+    value); safe in practice since Pydantic validates the actual instance
+    and no code treats a `ReplaySearchMeta` as a plain `SearchMeta`.
+    """
+
+    confirmed_counts: dict[str, int] | None  # type: ignore[assignment]
+    possible_match_count: int | None  # type: ignore[assignment]
 
 
 class SearchResponse(BaseModel):
@@ -131,16 +151,19 @@ class SearchResponse(BaseModel):
     meta: SearchMeta
 
 
-class SearchReplayResponse(BaseModel):
-    """`GET /search/{search_id}`'s own response shape - kept separate from
-    `SearchResponse` rather than extending it, so `POST /search`'s response
-    contract stays exactly as it is today."""
+class SearchReplayResponse(SearchResponse):
+    """`GET /search/{search_id}`'s own response shape - extends
+    `SearchResponse` (not a fully separate schema) so a future change to
+    `data`/`next_cursor` doesn't have to be mirrored by hand into two
+    classes; `meta` is narrowed to `ReplaySearchMeta` and `filters` is new,
+    neither of which touches `SearchResponse`'s own contract for POST
+    /search."""
 
-    data: list[SearchResult]
-    next_cursor: str | None = None
-    meta: SearchMeta
-    #: The exact filters this search ran with (Search.filters verbatim:
-    #: origin_country, target_countries, program_level, field) - already the
-    #: shape POST /scholarships/{id}'s MatchProfileRequest needs to restore a
-    #: personalized modal explanation without the caller re-deriving it.
+    meta: ReplaySearchMeta
+    #: The exact filters this search ran with - Search.filters verbatim
+    #: (origin_country, target_countries, program_level, field). A superset
+    #: of what POST /scholarships/{id}'s MatchProfileRequest declares (it has
+    #: no target_countries field) but safe to pass through unmodified: that
+    #: model doesn't forbid extra fields, so restoring a personalized modal
+    #: explanation from this dict needs no trimming.
     filters: dict
