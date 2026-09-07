@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -497,11 +497,14 @@ async def bulk_review_decision(
     return BulkReviewDecisionResponse(results=results)
 
 
-def _result_destinations(facts: dict) -> list[str]:
-    """`build_cycle_facts` already dedupes/sorts this at write time - this
-    re-normalizes anyway so the two read sites can't silently drift apart on
-    how they handle it."""
-    return sorted({str(v) for v in facts.get("destinations", [])})
+def _string_list(value: Any) -> list[str]:
+    """A facts JSONB list field isn't guaranteed to actually be a list - a
+    bare `for x in value` over a non-list raises TypeError, and a non-string
+    item fails `list[str]` validation building the response. Silently drops
+    anything that isn't a string rather than crash over one bad item."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 @dataclass(frozen=True)
@@ -510,15 +513,21 @@ class _DerivedFacts:
     #: Never null - a value the contract can't represent (missing, or out of
     #: {"date","datetime"}) clamps to "datetime", the same fallback already
     #: used when the key is simply absent, so this feeds `evaluate_public_status`/
-    #: `evaluate_status_detail` and the public response identically. Only
-    #: meaningful when `deadline_at` is set - callers null it out themselves
-    #: in that case, same as before.
+    #: `evaluate_status_detail` identically regardless of what the public
+    #: field ends up showing. Use `.public_deadline_precision` for the
+    #: response field itself - null whenever there's no deadline at all.
     deadline_precision: Literal["date", "datetime"]
     deadline_timezone: str | None
     degree_levels: list[str]
     expected_reopen_month: int | None
     funding_type: str | None
     destinations: list[str]
+    eligibility_note: str | None
+    field_names: list[str]
+
+    @property
+    def public_deadline_precision(self) -> Literal["date", "datetime"] | None:
+        return self.deadline_precision if self.deadline_at else None
 
 
 def _derive_facts(facts: dict) -> _DerivedFacts:
@@ -527,17 +536,20 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
 
     `facts` isn't schema-enforced below `publish()` - a row written directly
     by one of this repo's own one-off admin/backfill scripts could hold a
-    value outside contract for any of these. Two failure modes that matter
+    value outside contract for any of these. Three failure modes that matter
     here: an unguarded value can crash the whole response building a
-    strictly-typed SearchResult/ScholarshipDetailResponse field (a
-    non-ISO deadline_at, a non-Literal deadline_precision, an
-    out-of-taxonomy funding_type, a non-string item in `levels`) - and,
-    subtler, computing status/status_detail from the *raw* value while only
+    strictly-typed SearchResult/ScholarshipDetailResponse field (a non-ISO
+    deadline_at, a non-Literal deadline_precision, a non-list `levels`/
+    `field_names` or one with non-string items, a non-string
+    eligibility_note); `raw_value in TAXONOMY.funding_types` raises
+    TypeError instead of returning False if `raw_value` is unhashable (a
+    list or dict), so an isinstance check has to come first; and, subtler,
+    computing status/status_detail from the *raw* value while only
     sanitizing what's shown to the caller produces an internally
     contradictory response (status_detail: "opening_soon" next to a nulled
     expected_reopen_month). Deriving everything once, upfront, and feeding
     the same sanitized values to both the status computation and the public
-    fields closes both at once.
+    fields closes all three at once.
     """
     deadline_at_raw = facts.get("deadline_at")
     deadline_at = None
@@ -559,15 +571,31 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
         else None
     )
     raw_funding_type = facts.get("funding_type")
-    funding_type = raw_funding_type if raw_funding_type in TAXONOMY.funding_types else None
+    funding_type = (
+        raw_funding_type
+        if isinstance(raw_funding_type, str) and raw_funding_type in TAXONOMY.funding_types
+        else None
+    )
+    raw_destinations = facts.get("destinations", [])
+    destinations = (
+        sorted({str(value) for value in raw_destinations})
+        if isinstance(raw_destinations, list)
+        else []
+    )
+    raw_eligibility_note = facts.get("eligibility_note")
+    eligibility_note = raw_eligibility_note if isinstance(raw_eligibility_note, str) else None
+    raw_deadline_timezone = facts.get("deadline_timezone")
+    deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
     return _DerivedFacts(
         deadline_at=deadline_at,
         deadline_precision=deadline_precision,
-        deadline_timezone=facts.get("deadline_timezone"),
-        degree_levels=[value for value in facts.get("levels", []) if isinstance(value, str)],
+        deadline_timezone=deadline_timezone,
+        degree_levels=_string_list(facts.get("levels", [])),
         expected_reopen_month=expected_reopen_month,
         funding_type=funding_type,
-        destinations=_result_destinations(facts),
+        destinations=destinations,
+        eligibility_note=eligibility_note,
+        field_names=_string_list(facts.get("field_names", [])),
     )
 
 
@@ -614,11 +642,11 @@ def _search_result(
         status=status.value,
         status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
-        eligibility_note=facts.get("eligibility_note"),
-        field_names=facts.get("field_names", []),
+        eligibility_note=derived.eligibility_note,
+        field_names=derived.field_names,
         destinations=derived.destinations,
         deadline_at=derived.deadline_at,
-        deadline_precision=derived.deadline_precision if derived.deadline_at else None,
+        deadline_precision=derived.public_deadline_precision,
         degree_levels=derived.degree_levels,
         expected_reopen_month=derived.expected_reopen_month,
         funding_type=derived.funding_type,
@@ -858,11 +886,11 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         official_url=row.official_cycle_url,
         facts=facts,
         last_verified_at=row.last_verified_at,
-        eligibility_note=facts.get("eligibility_note"),
-        field_names=facts.get("field_names", []),
+        eligibility_note=derived.eligibility_note,
+        field_names=derived.field_names,
         destinations=derived.destinations,
         deadline_at=derived.deadline_at,
-        deadline_precision=derived.deadline_precision if derived.deadline_at else None,
+        deadline_precision=derived.public_deadline_precision,
         degree_levels=derived.degree_levels,
         expected_reopen_month=derived.expected_reopen_month,
         funding_type=derived.funding_type,

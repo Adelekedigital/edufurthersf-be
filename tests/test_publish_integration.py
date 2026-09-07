@@ -304,6 +304,8 @@ async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
         "expected_reopen_month": 13,
         "levels": ["masters", 123, None],
         "funding_type": "free_money",
+        "eligibility_note": 12345,
+        "field_names": ["MSc Development Economics", 42, None],
     }
     db.add(cycle)
     await db.commit()
@@ -317,6 +319,61 @@ async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
         assert response_json["expected_reopen_month"] is None
         assert response_json["degree_levels"] == ["masters"]
         assert response_json["funding_type"] is None
+        assert response_json["eligibility_note"] is None
+        assert response_json["field_names"] == ["MSc Development Economics"]
+
+
+async def test_an_unhashable_funding_type_does_not_crash_the_membership_check(
+    db, client
+) -> None:
+    """`raw_value in TAXONOMY.funding_types` raises TypeError instead of
+    returning False when raw_value is unhashable (a list/dict) - the
+    isinstance check must run first."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "funding_type": ["fully_funded"]}
+    db.add(cycle)
+    await db.commit()
+
+    search_response = await client.post("/api/v1/search", json=SEARCH)
+    assert search_response.status_code == 200, search_response.text
+    assert search_response.json()["data"][0]["funding_type"] is None
+
+
+async def test_a_non_list_levels_or_field_names_does_not_crash_the_response(
+    db, client
+) -> None:
+    """A bare `for x in value` over a non-list raises TypeError - `levels`/
+    `field_names` must degrade to empty, not crash, when facts holds
+    something other than a list at all (not just a list with bad items).
+    Uses the detail endpoint - corrupting `levels` this way also fails
+    /search's own hard-gate match on program_level, which would hide the
+    record before _derive_facts ever ran on it."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "levels": "masters", "field_names": "MSc Development Economics"}
+    db.add(cycle)
+    await db.commit()
+
+    detail_response = await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")
+    assert detail_response.status_code == 200, detail_response.text
+    detail = detail_response.json()
+    assert detail["degree_levels"] == []
+    assert detail["field_names"] == []
 
 
 async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) -> None:
