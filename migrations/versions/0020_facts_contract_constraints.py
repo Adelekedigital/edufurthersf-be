@@ -62,7 +62,10 @@ def upgrade() -> None:
         """
         ALTER TABLE scholarship_cycles
         ADD CONSTRAINT ck_scholarship_cycles_facts_deadline_precision
-        CHECK (facts->>'deadline_precision' IS NULL OR facts->>'deadline_precision' IN ('date', 'datetime'))
+        CHECK (
+            facts->>'deadline_precision' IS NULL
+            OR facts->>'deadline_precision' IN ('date', 'datetime')
+        )
         """
     )
     op.execute(
@@ -91,28 +94,23 @@ def upgrade() -> None:
         """
         ALTER TABLE scholarship_cycles
         ADD CONSTRAINT ck_scholarship_cycles_facts_eligibility_note
-        CHECK (facts->>'eligibility_note' IS NULL OR jsonb_typeof(facts->'eligibility_note') = 'string')
+        CHECK (
+            facts->>'eligibility_note' IS NULL
+            OR jsonb_typeof(facts->'eligibility_note') = 'string'
+        )
         """
     )
 
 
+def _drop(constraint: str) -> None:
+    op.execute(f"ALTER TABLE scholarship_cycles DROP CONSTRAINT {constraint}")
+
+
 def downgrade() -> None:
-    op.execute(
-        "ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_eligibility_note"
-    )
-    op.execute(
-        "ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_expected_reopen_month"
-    )
-    op.execute(
-        "ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_funding_type"
-    )
-    op.execute(
-        "ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_deadline_precision"
-    )
+    _drop("ck_scholarship_cycles_facts_eligibility_note")
+    _drop("ck_scholarship_cycles_facts_expected_reopen_month")
+    _drop("ck_scholarship_cycles_facts_funding_type")
+    _drop("ck_scholarship_cycles_facts_deadline_precision")
     for field in _ARRAY_FIELDS:
-        op.execute(
-            f"ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_{field}_is_array"
-        )
-    op.execute(
-        "ALTER TABLE scholarship_cycles DROP CONSTRAINT ck_scholarship_cycles_facts_is_object"
-    )
+        _drop(f"ck_scholarship_cycles_facts_{field}_is_array")
+    _drop("ck_scholarship_cycles_facts_is_object")

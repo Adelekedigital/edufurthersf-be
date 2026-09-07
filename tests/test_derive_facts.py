@@ -119,3 +119,27 @@ def test_explicit_null_facts_values_do_not_crash_normalised_set() -> None:
     assert _normalised_set({"destinations": None}, "destinations") == set()
     assert _normalised_set({}, "destinations") == set()
     assert _normalised_set({"destinations": ["CA", "gb"]}, "destinations") == {"ca", "gb"}
+
+
+def test_an_empty_eligibility_note_is_treated_as_absent() -> None:
+    """build_cycle_facts only ever writes this key for a non-empty note - a
+    bare isinstance(str) check would let "" through, a shape
+    build_cycle_facts can never actually produce."""
+    derived = _derive_facts({**BASE_FACTS, "eligibility_note": ""})
+    assert derived.eligibility_note is None
+    assert "eligibility_note" not in derived.sanitized_dict
+
+
+def test_a_non_string_deadline_timezone_does_not_crash_status_evaluation() -> None:
+    """A non-string deadline_timezone reaching ZoneInfo(...) unguarded
+    raises TypeError, not the ZoneInfoNotFoundError deadline_cutoff
+    actually catches - deadline_timezone must be sanitized before it ever
+    reaches that call, the same as every other facts-derived value."""
+    derived = _derive_facts(
+        {
+            **BASE_FACTS,
+            "deadline_at": "2026-12-31T00:00:00Z",
+            "deadline_timezone": ["not", "a", "string"],
+        }
+    )
+    assert derived.deadline_timezone is None

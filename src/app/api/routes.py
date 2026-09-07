@@ -228,8 +228,16 @@ def _cycle_admin_read(cycle: ScholarshipCycle, evaluated_at: datetime) -> Schola
     # facts isn't schema-enforced below publish() and can come back as
     # Python None even though the column is NOT NULL - JSONB.none_as_null
     # defaults to False, so an ORM-level `cycle.facts = None` persists as
-    # the JSON null literal, not SQL NULL. Guard once, use everywhere below.
+    # the JSON null literal, not SQL NULL.
     facts = cycle.facts or {}
+    # Route the deadline fields through the same sanitizer _search_result/
+    # _detail use, rather than reading facts.get(...) directly here too - an
+    # out-of-contract deadline_timezone (not a string) used to reach
+    # ZoneInfo(...) unguarded and raise TypeError, 500-ing this whole
+    # listing over one bad cycle. The `facts=` field below still returns
+    # the raw dict, unlike the public detail endpoint - this is an admin
+    # debugging view, where seeing the actual corruption is the point.
+    derived = _derive_facts(facts)
     return ScholarshipCycleAdminRead(
         cycle_id=cycle.cycle_id,
         provider_cycle_key=cycle.provider_cycle_key,
@@ -238,9 +246,9 @@ def _cycle_admin_read(cycle: ScholarshipCycle, evaluated_at: datetime) -> Schola
         public_status=cycle.public_status.value,
         evaluated_public_status=evaluate_public_status(
             cycle.public_status,
-            deadline_at=_safe_deadline_at(facts.get("deadline_at")),
-            deadline_precision=facts.get("deadline_precision", "datetime"),
-            deadline_timezone=facts.get("deadline_timezone"),
+            deadline_at=derived.deadline_at,
+            deadline_precision=derived.deadline_precision,
+            deadline_timezone=derived.deadline_timezone,
             status_valid_until=cycle.status_valid_until,
             now=evaluated_at,
         ).value,
@@ -637,7 +645,16 @@ def _derive_facts(facts: dict) -> _DerivedFacts:
         else []
     )
     raw_eligibility_note = facts.get("eligibility_note")
-    eligibility_note = raw_eligibility_note if isinstance(raw_eligibility_note, str) else None
+    # Truthy, not just isinstance(str) - build_cycle_facts only ever writes
+    # this key for a non-empty note (matching eligibility_note's own
+    # honesty rule: an empty string means nothing was provided, same as
+    # absent). A bare isinstance check would let "" through and disagree
+    # with the shape build_cycle_facts can actually produce.
+    eligibility_note = (
+        raw_eligibility_note
+        if isinstance(raw_eligibility_note, str) and raw_eligibility_note
+        else None
+    )
     raw_deadline_timezone = facts.get("deadline_timezone")
     deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
     raw_origin_mode = facts.get("origin_mode")
@@ -1360,7 +1377,6 @@ async def scholarship_detail_with_explanation(
     if row is None:
         raise HTTPException(status_code=404, detail="Scholarship not found")
     detail = _detail(row)
-    facts = row.facts or {}
     countries = await load_vocabulary(db)
     try:
         origin = countries.origin(payload.origin_country)
@@ -1372,18 +1388,22 @@ async def scholarship_detail_with_explanation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # detail.destinations is already the sanitized value _detail() computed
-    # via _derive_facts - reuse it rather than re-deriving from raw facts,
-    # which would repeat the same explicit-null crash risk this exists to
-    # avoid (facts.get("destinations", []) doesn't catch an explicit null).
+    # detail.facts is the same sanitized dict _detail() already built via
+    # _derive_facts (destinations, origin_mode, field_mode, evidence_fresh,
+    # etc.) - use it here too, not the raw stored facts, so the match
+    # decision (and the AI explanation grounded in it) can never disagree
+    # with what this same response's own facts field shows. Computing the
+    # decision from a raw origin_mode/field_mode this response has already
+    # clamped away (e.g. "Restricted" clamped to "unknown") could otherwise
+    # return fit="confirmed" right next to facts.origin_mode == "unknown".
     profile = SearchProfile(origin, frozenset(detail.destinations), degree, accepted_fields)
-    decision = evaluate_match(profile, facts)
+    decision = evaluate_match(profile, detail.facts)
     if decision is None:
         return detail
     detail.match_explanation = await get_match_explanation(
         db,
         cycle=row,
-        facts=facts,
+        facts=detail.facts,
         origin_country=origin,
         program_level=degree,
         field=payload.field,

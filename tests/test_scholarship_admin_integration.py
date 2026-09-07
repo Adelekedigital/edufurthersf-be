@@ -201,4 +201,28 @@ async def test_a_malformed_deadline_at_does_not_crash_the_whole_listing(db, clie
         "/api/v1/internal/admin/scholarships", params={"q": "Corrupted Award"}, headers=AUTH
     )
     assert response.status_code == 200, response.text
+
+
+async def test_a_non_string_deadline_timezone_does_not_crash_the_whole_listing(
+    db, client
+) -> None:
+    """A non-string deadline_timezone reaching ZoneInfo(...) unguarded
+    raises TypeError, not the ZoneInfoNotFoundError deadline_cutoff
+    actually catches - deadline_timezone isn't covered by any DB
+    constraint, so this stays a real, reachable scenario."""
+    scholarship = await _scholarship(db, name="Bad Timezone Award", slug="bad-timezone-award")
+    await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "deadline_at": "2026-12-31T00:00:00Z", "deadline_precision": "date"},
+        headers=AUTH,
+    )
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "deadline_timezone": ["not", "a", "string"]}
+    db.add(cycle)
+    await db.commit()
+
+    response = await client.get(
+        "/api/v1/internal/admin/scholarships", params={"q": "Bad Timezone Award"}, headers=AUTH
+    )
+    assert response.status_code == 200, response.text
     assert response.json()["data"][0]["cycles"][0]["evaluated_public_status"] == "open_verified"
