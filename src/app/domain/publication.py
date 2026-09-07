@@ -98,7 +98,7 @@ def build_cycle_facts(
     normalized_field_names = sorted({name.strip() for name in (field_names or []) if name.strip()})
     if normalized_field_names:
         facts["field_names"] = normalized_field_names
-    if funding_type is not None:
+    if funding_type:
         facts["funding_type"] = TAXONOMY.funding_type(funding_type)
     if deadline_at is not None:
         facts["deadline_at"] = deadline_at.isoformat()

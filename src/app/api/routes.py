@@ -2,9 +2,10 @@ import asyncio
 import hmac
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -503,18 +504,71 @@ def _result_destinations(facts: dict) -> list[str]:
     return sorted({str(v) for v in facts.get("destinations", [])})
 
 
-def _valid_deadline_precision(value: Any) -> Literal["date", "datetime"] | None:
-    """`facts` JSONB isn't schema-enforced at the DB level - only the
-    `publish()` endpoint validates it going in. A row written by a one-off
-    admin/backfill script (this repo has several) with a value outside the
-    contract must degrade this one field to null, not raise
-    pydantic.ValidationError building SearchResult and 500 the whole
-    /search response for every caller over one bad row."""
-    return value if value in ("date", "datetime") else None
+@dataclass(frozen=True)
+class _DerivedFacts:
+    deadline_at: datetime | None
+    #: Never null - a value the contract can't represent (missing, or out of
+    #: {"date","datetime"}) clamps to "datetime", the same fallback already
+    #: used when the key is simply absent, so this feeds `evaluate_public_status`/
+    #: `evaluate_status_detail` and the public response identically. Only
+    #: meaningful when `deadline_at` is set - callers null it out themselves
+    #: in that case, same as before.
+    deadline_precision: Literal["date", "datetime"]
+    deadline_timezone: str | None
+    degree_levels: list[str]
+    expected_reopen_month: int | None
+    funding_type: str | None
+    destinations: list[str]
 
 
-def _valid_reopen_month(value: Any) -> int | None:
-    return value if isinstance(value, int) and 1 <= value <= 12 else None
+def _derive_facts(facts: dict) -> _DerivedFacts:
+    """One sanitization pass over a cycle's `facts` JSONB, shared by
+    `_search_result` and `_detail`.
+
+    `facts` isn't schema-enforced below `publish()` - a row written directly
+    by one of this repo's own one-off admin/backfill scripts could hold a
+    value outside contract for any of these. Two failure modes that matter
+    here: an unguarded value can crash the whole response building a
+    strictly-typed SearchResult/ScholarshipDetailResponse field (a
+    non-ISO deadline_at, a non-Literal deadline_precision, an
+    out-of-taxonomy funding_type, a non-string item in `levels`) - and,
+    subtler, computing status/status_detail from the *raw* value while only
+    sanitizing what's shown to the caller produces an internally
+    contradictory response (status_detail: "opening_soon" next to a nulled
+    expected_reopen_month). Deriving everything once, upfront, and feeding
+    the same sanitized values to both the status computation and the public
+    fields closes both at once.
+    """
+    deadline_at_raw = facts.get("deadline_at")
+    deadline_at = None
+    if deadline_at_raw:
+        try:
+            deadline_at = datetime.fromisoformat(deadline_at_raw)
+        except (TypeError, ValueError):
+            deadline_at = None
+    raw_precision = facts.get("deadline_precision", "datetime")
+    deadline_precision: Literal["date", "datetime"] = (
+        raw_precision if raw_precision in ("date", "datetime") else "datetime"
+    )
+    raw_reopen_month = facts.get("expected_reopen_month")
+    expected_reopen_month = (
+        raw_reopen_month
+        if isinstance(raw_reopen_month, int)
+        and not isinstance(raw_reopen_month, bool)
+        and 1 <= raw_reopen_month <= 12
+        else None
+    )
+    raw_funding_type = facts.get("funding_type")
+    funding_type = raw_funding_type if raw_funding_type in TAXONOMY.funding_types else None
+    return _DerivedFacts(
+        deadline_at=deadline_at,
+        deadline_precision=deadline_precision,
+        deadline_timezone=facts.get("deadline_timezone"),
+        degree_levels=[value for value in facts.get("levels", []) if isinstance(value, str)],
+        expected_reopen_month=expected_reopen_month,
+        funding_type=funding_type,
+        destinations=_result_destinations(facts),
+    )
 
 
 def _search_result(
@@ -529,24 +583,21 @@ def _search_result(
     award was open.
     """
     facts = row.facts or {}
-    deadline_at_raw = facts.get("deadline_at")
-    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
-    deadline_precision = facts.get("deadline_precision", "datetime")
-    deadline_timezone = facts.get("deadline_timezone")
+    derived = _derive_facts(facts)
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
         status_valid_until=row.status_valid_until,
         now=evaluated_at,
     )
     status_detail = evaluate_status_detail(
         status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
-        expected_reopen_month=facts.get("expected_reopen_month"),
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
+        expected_reopen_month=derived.expected_reopen_month,
         now=evaluated_at,
     )
     caveats = list(decision.caveats)
@@ -565,12 +616,12 @@ def _search_result(
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
-        destinations=_result_destinations(facts),
-        deadline_at=deadline_at,
-        deadline_precision=_valid_deadline_precision(deadline_precision) if deadline_at else None,
-        degree_levels=facts.get("levels", []),
-        expected_reopen_month=_valid_reopen_month(facts.get("expected_reopen_month")),
-        funding_type=facts.get("funding_type"),
+        destinations=derived.destinations,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision if derived.deadline_at else None,
+        degree_levels=derived.degree_levels,
+        expected_reopen_month=derived.expected_reopen_month,
+        funding_type=derived.funding_type,
         provider_country=row.scholarship.provider.country
         if row.scholarship and row.scholarship.provider
         else None,
@@ -774,25 +825,22 @@ async def run_due_jobs_route(
 
 def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     facts = row.facts or {}
-    deadline_at_raw = facts.get("deadline_at")
-    deadline_at = datetime.fromisoformat(deadline_at_raw) if deadline_at_raw else None
-    deadline_precision = facts.get("deadline_precision", "datetime")
-    deadline_timezone = facts.get("deadline_timezone")
+    derived = _derive_facts(facts)
     evaluated_at = datetime.now(UTC)
     status = evaluate_public_status(
         row.public_status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
         status_valid_until=row.status_valid_until,
         now=evaluated_at,
     )
     status_detail = evaluate_status_detail(
         status,
-        deadline_at=deadline_at,
-        deadline_precision=deadline_precision,
-        deadline_timezone=deadline_timezone,
-        expected_reopen_month=facts.get("expected_reopen_month"),
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision,
+        deadline_timezone=derived.deadline_timezone,
+        expected_reopen_month=derived.expected_reopen_month,
         now=evaluated_at,
     )
     caveats: list[str] = []
@@ -812,12 +860,12 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         last_verified_at=row.last_verified_at,
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
-        destinations=_result_destinations(facts),
-        deadline_at=deadline_at,
-        deadline_precision=_valid_deadline_precision(deadline_precision) if deadline_at else None,
-        degree_levels=facts.get("levels", []),
-        expected_reopen_month=_valid_reopen_month(facts.get("expected_reopen_month")),
-        funding_type=facts.get("funding_type"),
+        destinations=derived.destinations,
+        deadline_at=derived.deadline_at,
+        deadline_precision=derived.deadline_precision if derived.deadline_at else None,
+        degree_levels=derived.degree_levels,
+        expected_reopen_month=derived.expected_reopen_month,
+        funding_type=derived.funding_type,
         provider_country=row.scholarship.provider.country,
         caveats=caveats,
     )

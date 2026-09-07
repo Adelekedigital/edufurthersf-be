@@ -280,9 +280,15 @@ async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
 ) -> None:
     """`facts` JSONB is only validated going in through publish() - a row
     written directly by one of this repo's own one-off admin/backfill
-    scripts could hold a value outside deadline_precision's/
-    expected_reopen_month's contract. That must degrade the one field to
-    null, never 500 the entire /search response over one bad row."""
+    scripts could hold a value outside contract for any facts-derived
+    response field. That must degrade the one field, never 500 the entire
+    /search or detail response over one bad row.
+
+    `deadline_precision` clamps to "datetime" rather than going null - the
+    same fallback already used when the key is simply absent - because
+    `deadline_at` itself is still a real, valid instant here; nulling
+    `deadline_precision` while leaving `deadline_at` set would violate the
+    documented "null iff deadline_at is null" invariant."""
     scholarship = await _approved_scholarship(db)
     response = await client.post(
         f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
@@ -292,21 +298,64 @@ async def test_out_of_contract_facts_degrade_the_field_not_the_whole_response(
     assert response.status_code == 200, response.text
 
     cycle = await db.scalar(select(ScholarshipCycle))
-    cycle.facts = {**cycle.facts, "deadline_precision": "fortnight", "expected_reopen_month": 13}
+    cycle.facts = {
+        **cycle.facts,
+        "deadline_precision": "fortnight",
+        "expected_reopen_month": 13,
+        "levels": ["masters", 123, None],
+        "funding_type": "free_money",
+    }
     db.add(cycle)
     await db.commit()
 
-    search_response = await client.post("/api/v1/search", json=SEARCH)
-    assert search_response.status_code == 200, search_response.text
-    result = search_response.json()["data"][0]
-    assert result["deadline_precision"] is None
-    assert result["expected_reopen_month"] is None
+    for response_json in (
+        (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0],
+        (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json(),
+    ):
+        assert response_json["deadline_at"].startswith("2026-12-31")
+        assert response_json["deadline_precision"] == "datetime"
+        assert response_json["expected_reopen_month"] is None
+        assert response_json["degree_levels"] == ["masters"]
+        assert response_json["funding_type"] is None
 
-    detail_response = await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")
-    assert detail_response.status_code == 200, detail_response.text
-    detail = detail_response.json()
-    assert detail["deadline_precision"] is None
-    assert detail["expected_reopen_month"] is None
+
+async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) -> None:
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "deadline_at": "2026-12-31T00:00:00Z", "deadline_precision": "date"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "deadline_at": "not-a-real-date"}
+    db.add(cycle)
+    await db.commit()
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["deadline_at"] is None
+    assert result["deadline_precision"] is None
+
+
+async def test_a_boolean_reopen_month_is_not_treated_as_month_one(db, client) -> None:
+    """`isinstance(True, int)` is True in Python - a stray boolean in facts
+    must not slip through the month-range guard and get coerced to 1."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={**CYCLE, "public_status": "expected_to_reopen"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    cycle = await db.scalar(select(ScholarshipCycle))
+    cycle.facts = {**cycle.facts, "expected_reopen_month": True}
+    db.add(cycle)
+    await db.commit()
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["expected_reopen_month"] is None
 
 
 async def test_search_result_exposes_expected_reopen_month_not_a_deadline(db, client) -> None:
