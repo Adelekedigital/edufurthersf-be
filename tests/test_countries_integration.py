@@ -102,6 +102,24 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
     }
 
 
+async def test_taxonomies_types_filters_to_requested_collections_only(db, client) -> None:
+    await sync_countries(db, _FakeCore([_entry("NG", "Nigeria"), _entry("CA", "Canada")]))
+    body = (
+        await client.get("/api/v1/taxonomies?types=fields&types=narrow_fields")
+    ).json()
+    assert body["fields"]
+    assert body["narrow_fields"]
+    assert body["countries"] == []
+    assert body["destinations"] == []
+    assert body["degrees"] == []
+    assert body["award_types"] == []
+
+
+async def test_taxonomies_unknown_type_is_a_422(db, client) -> None:
+    response = await client.get("/api/v1/taxonomies?types=not_a_real_type")
+    assert response.status_code == 422
+
+
 async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
     await sync_countries(db, _FakeCore([_entry("KE", "Kenya"), _entry("CA", "Canada")]))
     base = {"program_level": "phd", "field": "health_and_welfare"}

@@ -54,6 +54,13 @@ populate the field dropdown - `narrow_fields` exists for completeness/future
 use (e.g. showing a scholarship's specific tagged programme on its detail
 page) but isn't itself a valid `field` search value.
 
+Optionally narrow the response with a repeated `types` query param -
+`GET /taxonomies?types=fields&types=narrow_fields` returns only those two
+collections; every other key comes back as `[]`, not omitted, so the shape
+never changes. Omit `types` entirely for the full vocabulary (unchanged
+default). Valid values: `countries`, `destinations`, `degrees`, `fields`,
+`narrow_fields`, `award_types`. An unknown value is a `422`.
+
 ## `POST /search`
 
 ```jsonc
