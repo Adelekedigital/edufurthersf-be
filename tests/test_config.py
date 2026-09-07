@@ -3,6 +3,26 @@ from app.core.config import Settings, normalize_database_url
 _DEPLOYED_KWARGS = {"qstash_expected_destination": "https://finder.example/api/v1/internal/jobs"}
 
 
+def test_sentry_active_defaults_to_is_deployed() -> None:
+    assert (
+        Settings(environment="production", sentry_enabled=None, **_DEPLOYED_KWARGS).sentry_active
+        is True
+    )
+    assert (
+        Settings(environment="staging", sentry_enabled=None, **_DEPLOYED_KWARGS).sentry_active
+        is True
+    )
+    assert Settings(environment="development", sentry_enabled=None).sentry_active is False
+
+
+def test_sentry_active_explicit_override_wins() -> None:
+    assert (
+        Settings(environment="production", sentry_enabled=False, **_DEPLOYED_KWARGS).sentry_active
+        is False
+    )
+    assert Settings(environment="development", sentry_enabled=True).sentry_active is True
+
+
 def test_posthog_dispatch_active_defaults_to_is_deployed() -> None:
     assert Settings(
         environment="production", posthog_dispatch_enabled=None, **_DEPLOYED_KWARGS

@@ -16,7 +16,7 @@ from app.infra.migration_status import migration_status
 settings = get_settings()
 configure_logging()
 initialize_sentry(
-    settings.sentry_dsn,
+    settings.sentry_dsn if settings.sentry_active else None,
     settings.environment,
     settings.app_version,
     settings.sentry_traces_sample_rate,
