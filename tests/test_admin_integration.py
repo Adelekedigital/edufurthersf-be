@@ -7,10 +7,12 @@ from sqlalchemy import select
 from app.domain.models import (
     AuditLog,
     OutboxEvent,
+    Provider,
     PublicStatus,
     RecordState,
     ReviewTask,
     Scholarship,
+    ScholarshipCycle,
     Source,
 )
 from app.infra.ingestion import import_feed_records
@@ -36,6 +38,40 @@ async def test_the_queue_orders_by_priority_then_age(db, client) -> None:
     body = (await client.get("/api/v1/internal/admin/reviews", headers=AUTH)).json()
     assert [task["reason"] for task in body["data"]] == ["urgent", "low_priority"]
     assert body["open_count"] == 2, "resolved work is not outstanding"
+
+
+async def test_a_cycle_linked_task_surfaces_its_cycle_id(db, client) -> None:
+    """A refresh_status/reverify_due-opened task (infra/freshness.py) has no
+    discovery - cycle_id is what lets a reviewer (or a future frontend) tell
+    which cycle it's about without parsing draft_recommendation by hand."""
+    provider = Provider(name="Example University", approved_domains=["example.test"])
+    db.add(provider)
+    await db.flush()
+    scholarship = Scholarship(
+        provider_id=provider.provider_id,
+        slug="award-cycle-link",
+        name="Award",
+        official_home_url="https://example.test/award",
+        award_type="scholarship",
+        lifecycle_state=RecordState.published,
+    )
+    db.add(scholarship)
+    await db.flush()
+    cycle = ScholarshipCycle(
+        scholarship_id=scholarship.scholarship_id,
+        provider_cycle_key="award-cycle-link-2026",
+        official_cycle_url="https://example.test/award/apply",
+        public_status=PublicStatus.open_verified,
+        facts={},
+    )
+    db.add(cycle)
+    await db.flush()
+    db.add(ReviewTask(cycle_id=cycle.cycle_id, reason="reverify_content_changed"))
+    await db.commit()
+
+    body = (await client.get("/api/v1/internal/admin/reviews", headers=AUTH)).json()
+    assert body["data"][0]["cycle_id"] == str(cycle.cycle_id)
+    assert body["data"][0]["discovery_id"] is None
 
 
 async def test_the_queue_carries_enough_to_actually_review_something(db, client) -> None:

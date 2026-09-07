@@ -54,6 +54,9 @@ class ReviewTaskSummary(BaseModel):
     state: str
     discovery_id: uuid.UUID | None = None
     revision_id: uuid.UUID | None = None
+    #: Set for a refresh_status/reverify_due-opened task (infra/freshness.py)
+    #: instead of discovery_id - null for a discovery-linked task.
+    cycle_id: uuid.UUID | None = None
     raw_title: str | None = None
     #: Without this a reviewer cannot verify anything, or tell two similarly
     #: titled candidates apart.

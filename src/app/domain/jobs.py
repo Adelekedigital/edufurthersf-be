@@ -11,7 +11,13 @@ class JobState(StrEnum):
     failed_review = "failed_review"
 
 
-RETRYABLE_KINDS = {"fetch_source_page", "extract_candidate", "dispatch_outbox"}
+RETRYABLE_KINDS = {
+    "fetch_source_page",
+    "extract_candidate",
+    "dispatch_outbox",
+    "refresh_status",
+    "reverify_due",
+}
 
 
 @dataclass(frozen=True)

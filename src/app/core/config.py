@@ -65,6 +65,34 @@ class Settings(BaseSettings):
     # Same tri-state rationale as sentry_enabled above.
     posthog_dispatch_enabled: bool | None = None
 
+    # Freshness/re-verification cadence (data-verification standard section
+    # 8), typed and environment-overridable rather than hardcoded literals
+    # scattered through job modules. Bucket-boundary thresholds first, then
+    # each bucket's fetch interval and maximum evidence age.
+    freshness_near_deadline_days: int = 14
+    freshness_upcoming_near_months: int = 1
+    freshness_upcoming_far_months: int = 2
+    freshness_open_far_fetch_hours: int = 24
+    freshness_open_far_max_age_hours: int = 48
+    freshness_open_near_fetch_hours: int = 6
+    freshness_open_near_max_age_hours: int = 12
+    freshness_rolling_fetch_hours: int = 24
+    freshness_rolling_max_age_hours: int = 48
+    freshness_upcoming_near_fetch_hours: int = 24
+    freshness_upcoming_far_fetch_hours: int = 168
+    freshness_upcoming_max_age_hours: int = 336
+    # max_age is 2x fetch_hours for every other bucket, giving _defer_or_flag
+    # a single-failure retry grace period before it ever escalates - these
+    # two matched their own fetch_hours exactly, which meant the instant a
+    # cycle became due it was already past its evidence deadline too, so its
+    # very first fetch failure after becoming due escalated immediately.
+    freshness_unknown_fetch_hours: int = 720
+    freshness_unknown_max_age_hours: int = 1440
+    freshness_closed_fetch_hours: int = 2160
+    freshness_closed_max_age_hours: int = 4320
+    refresh_status_batch_limit: int = 500
+    reverify_due_batch_limit: int = 100
+
     @field_validator("database_url")
     @classmethod
     def use_async_database_driver(cls, value: str) -> str:

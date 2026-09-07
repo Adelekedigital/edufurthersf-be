@@ -122,6 +122,20 @@ class ScholarshipCycle(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     facts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    #: The SourcePage `reverify_due` re-fetches to reverify this cycle's
+    #: official_cycle_url. Null until that job's first encounter with this
+    #: cycle - see migrations/0021_cycle_reverification_link.py.
+    source_page_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("source_pages.page_id"), nullable=True
+    )
+    #: True only while public_status is status_unknown *because*
+    #: refresh_status auto-downgraded it for evidence staleness - never set
+    #: for a reviewer's own status_unknown publish-time choice. The only
+    #: thing that lets reverify_due tell "this was open and just went stale"
+    #: apart from "a human was never confident about this one" well enough
+    #: to auto-restore the former on a confirmed unchanged recheck, without
+    #: ever promoting the latter. See migrations/0022_cycle_auto_downgraded.py.
+    auto_downgraded: Mapped[bool] = mapped_column(Boolean, default=False)
     scholarship: Mapped[Scholarship] = relationship(back_populates="cycles")
 
 
@@ -325,6 +339,15 @@ class ReviewTask(TimestampMixin, Base):
             unique=True,
             postgresql_where=text("state = 'open' AND resolution IS NULL"),
         ),
+        # Same guard, scoped to a cycle-linked task (refresh_status/
+        # reverify_due) instead of a discovery-linked one - see
+        # migrations/0021_cycle_reverification_link.py.
+        Index(
+            "uq_review_tasks_open_per_cycle",
+            "cycle_id",
+            unique=True,
+            postgresql_where=text("state = 'open' AND resolution IS NULL"),
+        ),
     )
     review_task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=new_uuid7
@@ -334,6 +357,9 @@ class ReviewTask(TimestampMixin, Base):
     )
     discovery_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("discoveries.discovery_id"), nullable=True
+    )
+    cycle_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("scholarship_cycles.cycle_id"), nullable=True
     )
     reason: Mapped[str] = mapped_column(String(255))
     priority: Mapped[int] = mapped_column(Integer, default=100)
