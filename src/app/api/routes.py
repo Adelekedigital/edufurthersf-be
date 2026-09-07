@@ -101,7 +101,11 @@ JOIN_INTENTS_PER_MINUTE = 5
 # target; passing it emits a warning instead of silently truncating results.
 PUBLISHED_CYCLE_SCAN_LIMIT = 2000
 #: Version of the deterministic ranking policy recorded with every response.
-MATCH_POLICY_VERSION = "match-v1"
+#: Bump this whenever evaluate_match's actual gating/scoring semantics
+#: change (not just the vocabulary it validates against) - v2 marks the
+#: ISCED-F field-matching rewrite (equality -> broad/narrow set
+#: intersection, commit 68157fd) that shipped without a version bump.
+MATCH_POLICY_VERSION = "match-v2"
 join_limiter = InMemoryRateLimiter()
 
 

@@ -16,7 +16,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-SNAPSHOT_SCHEMA_VERSION = "snapshot-v1"
+#: Bump when ALLOWED_RESULT_KEYS changes, not just the envelope shape below -
+#: a consumer reading old snapshots needs to know which fields could
+#: possibly have been present. v2 catches up on everything SearchResult
+#: gained since this allowlist was first written (status_detail,
+#: eligibility_note, field_names, destinations, deadline_at,
+#: deadline_precision, degree_levels, expected_reopen_month, funding_type,
+#: provider_country, award_type) - all silently snapshot-excluded until now,
+#: same "listed on purpose" rule below, just never revisited.
+SNAPSHOT_SCHEMA_VERSION = "snapshot-v2"
 
 #: Every key permitted in a stored result object. A field added to the public
 #: response is absent from the snapshot until it is listed here on purpose,
@@ -27,10 +35,21 @@ ALLOWED_RESULT_KEYS = frozenset(
         "cycle_id",
         "name",
         "provider",
+        "award_type",
         "status",
+        "status_detail",
         "fit",
         "official_url",
         "last_verified_at",
+        "eligibility_note",
+        "field_names",
+        "destinations",
+        "deadline_at",
+        "deadline_precision",
+        "degree_levels",
+        "expected_reopen_month",
+        "funding_type",
+        "provider_country",
         "caveats",
     }
 )

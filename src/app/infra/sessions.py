@@ -82,7 +82,7 @@ async def record_search_response(
     search.filters = filters
     search.filter_digest = filter_digest
     search.result_snapshot = snapshot
-    search.snapshot_schema_version = str(snapshot.get("schema_version", "snapshot-v1"))
+    search.snapshot_schema_version = str(snapshot.get("schema_version", "snapshot-v2"))
     search.match_policy_version = str(snapshot["meta"]["match_policy_version"])
     search.taxonomy_version = str(snapshot["meta"]["taxonomy_version"])
     search.requested_limit = requested_limit

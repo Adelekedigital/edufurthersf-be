@@ -84,7 +84,13 @@ class Taxonomy:
 
 
 TAXONOMY = Taxonomy(
-    version="taxonomy-v1",
+    # Bump whenever the vocabulary itself changes shape (a code is added,
+    # removed, or renamed), not for every new unrelated taxonomy dimension.
+    # v2 marks the field taxonomy rebuild (2 flat codes -> ISCED-F 2013
+    # 11 broad/29 narrow, commit 68157fd) that shipped without a bump - a
+    # stored Search.taxonomy_version could not previously distinguish a
+    # result evaluated before that rebuild from one evaluated after it.
+    version="taxonomy-v2",
     countries={"NG": "Nigeria", "CA": "Canada", "GB": "United Kingdom", "US": "United States"},
     # Codes are ISCED-aligned to match Core's `degree_levels` slugs, because a
     # join intent forwards this value and Core cannot resolve one it does not

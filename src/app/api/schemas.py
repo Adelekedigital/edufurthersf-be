@@ -109,8 +109,8 @@ class SearchMeta(BaseModel):
     # tied to what was actually shown rather than to the search as a whole.
     response_id: uuid.UUID
     evaluated_at: datetime
-    match_policy_version: str = "match-v1"
-    taxonomy_version: str = "taxonomy-v1"
+    match_policy_version: str = "match-v2"
+    taxonomy_version: str = "taxonomy-v2"
     confirmed_counts: dict[str, int]
     possible_match_count: int
     warnings: list[str] = Field(default_factory=list)
