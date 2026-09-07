@@ -67,6 +67,13 @@ class SearchResult(BaseModel):
     #: `eligibility_note`: a frontend shouldn't need to parse `facts` to show
     #: the specific programme name.
     field_names: list[str] = Field(default_factory=list)
+    #: This scholarship's own destination code(s), from `facts["destinations"]`
+    #: - one of the `GET /taxonomies` `destinations` codes. A frontend must
+    #: not infer a result's country from the search's own `target_countries`
+    #: (e.g. showing every card the first selected destination): a search can
+    #: target several countries at once, and which one(s) this specific award
+    #: actually covers is a fact about the award, not about the query.
+    destinations: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
 
 

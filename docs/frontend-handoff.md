@@ -32,6 +32,12 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
 6. **`POST /scholarships/{identifier}` is new** (`GET` still exists,
    unchanged) - same detail response, plus an AI-generated
    `match_explanation` when you send the searcher's profile. See below.
+7. **`destinations` is new** on every search result and the detail response -
+   fixes real observed behavior where a card showed `target_countries[0]`
+   (the first destination the searcher selected) as if it were the award's
+   own country, mislabeling awards from a multi-destination search (e.g. a
+   Canada-only award showing as "United States"). See "Destination display"
+   below - stop reading a result's country off the search filter.
 
 ## `GET /taxonomies`
 
@@ -96,6 +102,7 @@ back to the full vocabulary when populated.
       "last_verified_at": "2026-08-01T00:00:00Z",
       "eligibility_note": "Not open to UK nationals.", // present only for a restriction the schema can't otherwise represent
       "field_names": ["MSc Development Economics"], // source's own wording, for display - not a filter value
+      "destinations": ["CA"], // this award's own destination code(s) - see "Destination display" below
       "caveats": ["Some eligibility conditions need checking."]
     }
   ],
@@ -118,6 +125,19 @@ whichever destinations *are* covered, and `meta.warnings` carries
 `no_verified_coverage:<comma-separated codes>` for the rest. **Render this
 explicitly** ("We don't have verified coverage for France yet - showing
 results for Canada" rather than silently dropping the country or erroring).
+
+### Destination display (per result)
+
+`destinations` on each result is that award's own destination code(s) - a
+subset of `GET /taxonomies` `destinations`, and typically one code today
+(no published award currently covers more than one country, though the
+schema allows it). **Don't infer a card's country from the search's own
+`target_countries`** (e.g. always labeling every result with
+`target_countries[0]`) - a search can target several countries at once, and
+which one(s) a given award actually covers is a fact about the award, not
+about the query. Look the code(s) up in the `destinations` you already
+fetched from `GET /taxonomies` for the label, the same way you already do
+for the search form.
 
 ### Fields
 

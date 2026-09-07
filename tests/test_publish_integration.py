@@ -209,6 +209,27 @@ async def test_an_eligibility_note_surfaces_as_its_own_field_not_a_caveat(db, cl
     assert detail["caveats"] == []
 
 
+async def test_a_result_carries_its_own_destination_not_the_search_filter(db, client) -> None:
+    """A search can target several countries at once; which one(s) a given
+    award actually covers is a fact about the award, not something a
+    frontend should infer from the query it ran (e.g. always showing the
+    first selected destination)."""
+    scholarship = await _approved_scholarship(db)
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json=CYCLE,
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    multi_country_search = {**SEARCH, "target_countries": ["CA", "GB"]}
+    results = (await client.post("/api/v1/search", json=multi_country_search)).json()["data"]
+    assert results[0]["destinations"] == ["CA"]
+
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["destinations"] == ["CA"]
+
+
 async def test_a_second_cycle_can_be_added_to_an_already_published_scholarship(db, client) -> None:
     """A new intake is not a reason to unpublish the last one."""
     scholarship = await _approved_scholarship(db)

@@ -535,6 +535,7 @@ def _search_result(
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
+        destinations=sorted({str(v) for v in facts.get("destinations", [])}),
         official_url=row.official_cycle_url,
         last_verified_at=row.last_verified_at,
         caveats=caveats,
@@ -772,6 +773,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         last_verified_at=row.last_verified_at,
         eligibility_note=facts.get("eligibility_note"),
         field_names=facts.get("field_names", []),
+        destinations=sorted({str(v) for v in facts.get("destinations", [])}),
         caveats=caveats,
     )
 
