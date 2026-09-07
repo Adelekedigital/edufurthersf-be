@@ -18,19 +18,32 @@ def _sign(value: str, secret: str) -> str:
     return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
-def encode_cursor(offset: int, filter_digest: str, search_id: uuid.UUID, secret: str) -> str:
+def encode_cursor(
+    offset: int, filter_digest: str, search_id: uuid.UUID, limit: int, secret: str
+) -> str:
     # Binding the cursor to the normalized filter digest prevents replaying a
     # cursor from one search against a different query. Carrying the logical
     # search id keeps every page of one search grouped under it, so paging does
-    # not look like a series of separate searches.
+    # not look like a series of separate searches. Binding `limit` too closes a
+    # real page_number collision: page_number is computed at redemption time as
+    # `offset // limit + 1` (routes.py), so redeeming a cursor with a different
+    # limit than it was minted with can compute back to page_number=1 for a
+    # request that is not actually page one - record_search_response's
+    # (search_id, page_number) upsert would then silently overwrite the real
+    # first page with different data.
     payload = json.dumps(
-        {"offset": offset, "filter_digest": filter_digest, "search_id": str(search_id)},
+        {
+            "offset": offset,
+            "filter_digest": filter_digest,
+            "search_id": str(search_id),
+            "limit": limit,
+        },
         separators=(",", ":"),
     )
     return base64.urlsafe_b64encode(f"{payload}.{_sign(payload, secret)}".encode()).decode()
 
 
-def decode_cursor(cursor: str, filter_digest: str, secret: str) -> CursorState:
+def decode_cursor(cursor: str, filter_digest: str, limit: int, secret: str) -> CursorState:
     # Invalid cursors are deliberately indistinguishable from expired cursors;
     # do not expose signing or payload details to anonymous clients.
     try:
@@ -41,6 +54,7 @@ def decode_cursor(cursor: str, filter_digest: str, secret: str) -> CursorState:
         data = json.loads(payload)
         if (
             data["filter_digest"] != filter_digest
+            or data["limit"] != limit
             or not isinstance(data["offset"], int)
             or data["offset"] < 0
         ):

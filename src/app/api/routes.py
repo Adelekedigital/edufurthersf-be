@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,7 +33,9 @@ from app.api.review_schemas import (
     WithdrawResponse,
 )
 from app.api.schemas import (
+    ReplaySearchMeta,
     SearchMeta,
+    SearchReplayResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
@@ -45,7 +48,7 @@ from app.api.scholarship_admin_schemas import (
     ScholarshipCycleAdminRead,
 )
 from app.api.source_schemas import SourceCreateRequest, SourceListResponse, SourceRead
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.cursors import decode_cursor, encode_cursor
 from app.core.ids import new_uuid7
 from app.core.rate_limit import InMemoryRateLimiter
@@ -85,6 +88,7 @@ from app.infra.scholarship_admin import search_scholarships
 from app.infra.sessions import (
     SESSION_COOKIE,
     filter_digest,
+    get_existing_session,
     get_or_create_session,
     record_search_response,
 )
@@ -981,6 +985,119 @@ async def create_join_intent(
     )
 
 
+search_replay_limiter = InMemoryRateLimiter()
+
+
+@router.get("/search/{search_id}", response_model=SearchReplayResponse)
+async def get_search(
+    search_id: uuid.UUID, request: Request, response: Response, db: AsyncSession = Depends(get_db)
+) -> SearchReplayResponse:
+    """Replay a retained search's first page without re-running matching.
+
+    Scoped to the requesting session, the same as `create_join_intent`'s own
+    `search_id`/`session_id` check: a search id alone must not be enough for
+    a different visitor to read someone else's filters/results. A
+    syntactically valid but unknown, someone else's, or expired search id all
+    collapse to the same 404 - nothing here should let a caller distinguish
+    "never existed" from "not yours" (a malformed, non-UUID id is a separate,
+    ordinary 422 from FastAPI's own path-parameter parsing, same as every
+    other UUID path parameter in this API).
+
+    A scholarship withdrawn since the original search is filtered out of the
+    replayed `data` rather than shown as a still-valid match: the whole point
+    of withdrawal is that the record is actively misleading, and this replay
+    otherwise has no other opportunity to reflect that within its 30-day
+    retention window. `meta.total_match_count`/`warnings` stay as originally
+    recorded - an accurate history of what the search itself found - only
+    the displayed rows are filtered.
+    """
+    settings = get_settings()
+    # A private, session-scoped response - unlike this API's other GETs,
+    # which all serve public, unscoped data safe for a shared cache.
+    response.headers["Cache-Control"] = "private, no-store"
+    limiter_key = request.client.host if request.client else "unknown"
+    if not search_replay_limiter.allow(limiter_key, settings.api_rate_limit_per_minute):
+        raise HTTPException(
+            status_code=429,
+            detail="Search replay rate limit exceeded",
+            headers={"Retry-After": "60"},
+        )
+    session = await get_existing_session(db, request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    stored = await db.scalar(
+        select(Search).where(
+            Search.search_id == search_id,
+            Search.session_id == session.session_id,
+            Search.page_number == 1,
+            Search.expires_at > datetime.now(UTC),
+        )
+    )
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    try:
+        return await _replay_search(db, stored, settings)
+    except (KeyError, TypeError, ValidationError) as exc:
+        # result_snapshot is only ever written by build_result_snapshot, so
+        # this should never actually be reachable - but nothing enforces
+        # that at the database level (it's a bare JSONB column, defaulting
+        # to `{}`), and a stored row shaped for an older/narrower
+        # ALLOWED_RESULT_KEYS is exactly the kind of "trusted but not
+        # guaranteed" data this repo's own facts-contract work already
+        # treats as reachable. A row this endpoint can't safely replay is
+        # unusable the same way a missing one is - not a 500.
+        logger.warning(
+            "search_replay_snapshot_unusable",
+            extra={"search_id": str(search_id), "error": str(exc)[:500]},
+        )
+        raise HTTPException(status_code=404, detail="Search not found") from exc
+
+
+async def _replay_search(
+    db: AsyncSession, stored: Search, settings: Settings
+) -> SearchReplayResponse:
+    snapshot = stored.result_snapshot
+    scholarship_ids = {item["scholarship_id"] for item in snapshot["data"]}
+    published_ids: set[str] = set()
+    if scholarship_ids:
+        published_ids = {
+            str(row)
+            for row in await db.scalars(
+                select(Scholarship.scholarship_id).where(
+                    Scholarship.scholarship_id.in_(uuid.UUID(sid) for sid in scholarship_ids),
+                    Scholarship.lifecycle_state == RecordState.published,
+                )
+            )
+        }
+    data = [item for item in snapshot["data"] if item["scholarship_id"] in published_ids]
+    next_cursor = (
+        encode_cursor(
+            stored.requested_limit,
+            stored.filter_digest,
+            stored.search_id,
+            stored.requested_limit,
+            settings.cursor_secret,
+        )
+        if snapshot["pagination"]["has_next_page"]
+        else None
+    )
+    return SearchReplayResponse(
+        data=data,
+        next_cursor=next_cursor,
+        meta=ReplaySearchMeta(
+            search_id=stored.search_id,
+            response_id=stored.id,
+            evaluated_at=stored.evaluated_at,
+            match_policy_version=stored.match_policy_version,
+            taxonomy_version=stored.taxonomy_version,
+            confirmed_counts=snapshot["meta"].get("confirmed_counts"),
+            possible_match_count=snapshot["meta"].get("possible_match_count"),
+            warnings=snapshot["meta"]["warnings"],
+        ),
+        filters=stored.filters,
+    )
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search(
     payload: SearchRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
@@ -1035,7 +1152,9 @@ async def search(
     search_id = new_uuid7()
     if payload.cursor:
         try:
-            cursor_state = decode_cursor(payload.cursor, digest, settings.cursor_secret)
+            cursor_state = decode_cursor(
+                payload.cursor, digest, payload.limit, settings.cursor_secret
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         offset, search_id = cursor_state.offset, cursor_state.search_id
@@ -1078,10 +1197,13 @@ async def search(
     for item in matched:
         if item.fit == "confirmed":
             confirmed_counts[item.status] = confirmed_counts.get(item.status, 0) + 1
+    possible_match_count = sum(item.fit == "possible" for item in matched)
     data = matched[offset : offset + payload.limit]
     has_next_page = offset + payload.limit < len(matched)
     next_cursor = (
-        encode_cursor(offset + payload.limit, digest, search_id, settings.cursor_secret)
+        encode_cursor(
+            offset + payload.limit, digest, search_id, payload.limit, settings.cursor_secret
+        )
         if has_next_page
         else None
     )
@@ -1096,6 +1218,8 @@ async def search(
         total_match_count=len(matched),
         has_next_page=has_next_page,
         warnings=warnings,
+        confirmed_counts=confirmed_counts,
+        possible_match_count=possible_match_count,
     )
     stored = await record_search_response(
         db,
@@ -1125,7 +1249,7 @@ async def search(
                 "filters": filters,
                 "total_match_count": len(matched),
                 "confirmed_counts": confirmed_counts,
-                "possible_match_count": sum(item.fit == "possible" for item in matched),
+                "possible_match_count": possible_match_count,
                 "match_policy_version": MATCH_POLICY_VERSION,
                 "taxonomy_version": TAXONOMY.version,
             },
@@ -1143,7 +1267,7 @@ async def search(
             match_policy_version=MATCH_POLICY_VERSION,
             taxonomy_version=TAXONOMY.version,
             confirmed_counts=confirmed_counts,
-            possible_match_count=sum(item.fit == "possible" for item in matched),
+            possible_match_count=possible_match_count,
             warnings=warnings,
         ),
     )

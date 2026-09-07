@@ -14,6 +14,26 @@ SESSION_COOKIE = "finder_session"
 SESSION_TTL = timedelta(days=30)
 
 
+async def get_existing_session(db: AsyncSession, cookie: str | None) -> AnonymousSession | None:
+    """Look up the caller's session without ever creating one.
+
+    `get_or_create_session` mints a fresh session (and sets a cookie) the
+    moment the presented cookie is missing or invalid - correct for a POST
+    that's about to record a search under some session, wrong for a GET that
+    only reads back something a session must already own: a caller with no
+    valid cookie can never own anything, so there is nothing to gain from
+    minting a session (and a cookie) just before immediately 404ing.
+    """
+    if not cookie:
+        return None
+    return await db.scalar(
+        select(AnonymousSession).where(
+            AnonymousSession.pseudonymous_id == cookie,
+            AnonymousSession.expires_at > datetime.now(UTC),
+        )
+    )
+
+
 async def get_or_create_session(
     db: AsyncSession, response: Response, cookie: str | None
 ) -> AnonymousSession:
@@ -24,14 +44,7 @@ async def get_or_create_session(
     time-ordered, so treating it as a credential would let one visitor adopt
     another's session and the searches attached to it.
     """
-    session = None
-    if cookie:
-        session = await db.scalar(
-            select(AnonymousSession).where(
-                AnonymousSession.pseudonymous_id == cookie,
-                AnonymousSession.expires_at > datetime.now(UTC),
-            )
-        )
+    session = await get_existing_session(db, cookie)
     if session is None:
         session = AnonymousSession(
             pseudonymous_id=secrets.token_urlsafe(32),

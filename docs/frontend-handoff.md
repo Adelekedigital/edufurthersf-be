@@ -52,6 +52,12 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    with `destinations` (the award's own study country) - they answer
    different questions and can legitimately differ on the same award (a
    UK-based foundation funding study in Canada).
+10. **`GET /search/{search_id}` is new** - replays a search's stored page one
+    (30-day retention) without a fresh `POST`, for a page refresh,
+    back-navigation, or a shared/bookmarked results link. See below.
+    `meta.confirmed_counts`/`possible_match_count` are now nullable on the
+    shared meta shape - only ever `null` on a `GET` replay of a search made
+    before this endpoint shipped, never on `POST /search` itself.
 
 ## `GET /taxonomies`
 
@@ -232,6 +238,42 @@ A fresh search (no `cursor`) always starts a new `search_id`; pass
 `next_cursor` back as `cursor` for the next page of the *same* search - don't
 resubmit the original filters as a new search per page, since that would
 count as a new search event.
+
+## `GET /search/{search_id}`
+
+Replays a search's stored page one - same `SearchResult`/`meta` shape as
+`POST /search`, plus a `filters` field:
+
+```jsonc
+// response
+{
+  "data": [ /* same shape as POST /search's data */ ],
+  "next_cursor": "...",
+  "meta": { /* same shape as POST /search's meta - confirmed_counts/possible_match_count nullable, see above */ },
+  "filters": {
+    "origin_country": "NG", "target_countries": ["CA", "GB"],
+    "program_level": "masters", "field": "health_and_welfare"
+  }
+}
+```
+
+Use `filters` to restore the searcher's profile for `POST
+/scholarships/{identifier}`'s personalized `match_explanation` (it has
+`origin_country`/`program_level`/`field` - `target_countries` is extra,
+ignore it there) without needing the original search form state around.
+
+Requires the same session cookie the original `POST /search` set - **not** a
+bare shareable link like `GET /scholarships/{identifier}` is. A search made
+in a different browser/session, an unknown `search_id`, or one past its
+30-day retention all come back as a plain `404` - same shape as any other
+not-found, nothing distinguishes "never existed" from "not yours." Response
+carries `Cache-Control: private, no-store` - don't let a shared cache/CDN
+serve one visitor's replayed search to another.
+
+A scholarship withdrawn since the original search is silently omitted from
+the replayed `data` - `meta.total_match_count` stays as originally recorded
+(an accurate history of what the search found at the time), only the
+displayed rows reflect current withdrawal state.
 
 ## `GET` / `POST /scholarships/{identifier}`
 
