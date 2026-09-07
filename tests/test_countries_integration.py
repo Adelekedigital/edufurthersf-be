@@ -120,6 +120,23 @@ async def test_taxonomies_unknown_type_is_a_422(db, client) -> None:
     assert response.status_code == 422
 
 
+async def test_taxonomies_bracket_array_form_is_not_silently_ignored(db, client) -> None:
+    """A client that serializes arrays as `types[]=x` (a common convention
+    outside FastAPI's own repeated-key style) must still get filtered, not
+    silently fall through to the unfiltered full vocabulary."""
+    body = (await client.get("/api/v1/taxonomies?types[]=fields")).json()
+    assert body["fields"]
+    assert body["countries"] == []
+    assert body["narrow_fields"] == []
+
+
+async def test_taxonomies_empty_bracket_array_is_a_422_not_the_full_vocabulary(
+    db, client
+) -> None:
+    response = await client.get("/api/v1/taxonomies?types[]=")
+    assert response.status_code == 422
+
+
 async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
     await sync_countries(db, _FakeCore([_entry("KE", "Kenya"), _entry("CA", "Canada")]))
     base = {"program_level": "phd", "field": "health_and_welfare"}

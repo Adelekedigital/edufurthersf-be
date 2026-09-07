@@ -61,6 +61,11 @@ never changes. Omit `types` entirely for the full vocabulary (unchanged
 default). Valid values: `countries`, `destinations`, `degrees`, `fields`,
 `narrow_fields`, `award_types`. An unknown value is a `422`.
 
+If your HTTP client serializes arrays with a bracket suffix
+(`types[]=fields`) rather than FastAPI's plain repeated-key form, that's
+accepted too - both forms filter identically, and neither silently falls
+back to the full vocabulary.
+
 ## `POST /search`
 
 ```jsonc

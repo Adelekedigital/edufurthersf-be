@@ -783,6 +783,7 @@ TAXONOMY_TYPES = frozenset(
 
 @router.get("/taxonomies", response_model=TaxonomiesResponse)
 async def taxonomies(
+    request: Request,
     types: list[str] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> TaxonomiesResponse:
@@ -796,8 +797,16 @@ async def taxonomies(
     `?types=fields&types=narrow_fields`) - omit it for the full vocabulary.
     Unrequested collections come back as empty lists, not omitted keys, so
     the response shape never changes.
+
+    Some HTTP clients serialize a repeated param with a bracket suffix
+    (`types[]=fields`) instead of FastAPI's plain repeated-key form; that key
+    doesn't bind to the `types` parameter above, so accept it explicitly too
+    rather than silently ignoring it and falling back to the full,
+    unfiltered vocabulary.
     """
-    wanted = set(types) if types is not None else set(TAXONOMY_TYPES)
+    bracketed = request.query_params.getlist("types[]")
+    provided = types is not None or bool(bracketed)
+    wanted = {*(types or []), *bracketed} if provided else set(TAXONOMY_TYPES)
     unknown = wanted - TAXONOMY_TYPES
     if unknown:
         raise HTTPException(
