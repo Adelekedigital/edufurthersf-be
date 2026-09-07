@@ -10,7 +10,6 @@ future backfill/admin script). The one production write path
 inert today, not a live bug - closing it before it becomes one.
 """
 
-import sqlalchemy as sa
 from alembic import op
 
 revision = "0019_search_version_defaults_v2"
