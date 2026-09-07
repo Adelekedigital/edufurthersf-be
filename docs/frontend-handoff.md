@@ -54,6 +54,20 @@ populate the field dropdown - `narrow_fields` exists for completeness/future
 use (e.g. showing a scholarship's specific tagged programme on its detail
 page) but isn't itself a valid `field` search value.
 
+Optionally narrow the response with a repeated `types` query param -
+`GET /taxonomies?types=fields&types=narrow_fields` returns only those two
+collections; every other key comes back as `[]`, not omitted, so the shape
+never changes. Omitting `types`, or sending it empty (`?types=`), both mean
+"no filter" and return the full vocabulary - same result either way. Valid
+values: `countries`, `destinations`, `degrees`, `fields`, `narrow_fields`,
+`award_types`. An actual unrecognized value (e.g. `?types=bogus`) is a
+`422`.
+
+If your HTTP client serializes arrays with a bracket suffix
+(`types[]=fields`) rather than FastAPI's plain repeated-key form, that's
+accepted too - both forms filter identically, and neither silently falls
+back to the full vocabulary when populated.
+
 ## `POST /search`
 
 ```jsonc

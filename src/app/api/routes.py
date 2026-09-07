@@ -776,35 +776,83 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     )
 
 
+TAXONOMY_TYPES = frozenset(
+    {"countries", "destinations", "degrees", "fields", "narrow_fields", "award_types"}
+)
+
+
 @router.get("/taxonomies", response_model=TaxonomiesResponse)
-async def taxonomies(db: AsyncSession = Depends(get_db)) -> TaxonomiesResponse:
+async def taxonomies(
+    request: Request,
+    types: list[str] | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> TaxonomiesResponse:
     """The vocabularies a search form is built from.
 
     Countries come from the mirror of Core's catalogue; destinations are the
     subset with verified coverage, returned separately so the form can offer
     every origin while limiting where a search can be run.
+
+    `types` narrows the response to just the requested collections (e.g.
+    `?types=fields&types=narrow_fields`) - omit it, or send it empty
+    (`?types=`), for the full vocabulary. Unrequested collections come back
+    as empty lists, not omitted keys, so the response shape never changes.
+
+    Some HTTP clients serialize a repeated param with a bracket suffix
+    (`types[]=fields`) instead of FastAPI's plain repeated-key form; that key
+    doesn't bind to the `types` parameter above, so accept it explicitly too
+    rather than silently ignoring it and falling back to the full,
+    unfiltered vocabulary.
     """
-    countries = await load_vocabulary(db)
+    bracketed = request.query_params.getlist("types[]")
+    wanted = {value for value in (*(types or []), *bracketed) if value}
+    if not wanted:
+        wanted = set(TAXONOMY_TYPES)
+    unknown = wanted - TAXONOMY_TYPES
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown taxonomy type(s): {', '.join(sorted(unknown))}"
+        )
+
+    country_names: dict[str, str] = {}
+    destination_codes: frozenset[str] = frozenset()
+    if wanted & {"countries", "destinations"}:
+        vocabulary = await load_vocabulary(db)
+        country_names = vocabulary.names
+        destination_codes = vocabulary.destinations
+
     return TaxonomiesResponse(
         version=TAXONOMY.version,
         countries=[
-            TaxonomyItem(code=code, label=label) for code, label in sorted(countries.names.items())
-        ],
+            TaxonomyItem(code=code, label=label) for code, label in sorted(country_names.items())
+        ]
+        if "countries" in wanted
+        else [],
         destinations=[
-            TaxonomyItem(code=code, label=countries.names[code])
-            for code in sorted(countries.destinations)
-            if code in countries.names
-        ],
-        degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()],
+            TaxonomyItem(code=code, label=country_names[code])
+            for code in sorted(destination_codes)
+            if code in country_names
+        ]
+        if "destinations" in wanted
+        else [],
+        degrees=[TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.degrees.items()]
+        if "degrees" in wanted
+        else [],
         fields=[
             TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.broad_fields.items()
-        ],
+        ]
+        if "fields" in wanted
+        else [],
         narrow_fields=[
             TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.narrow_fields.items()
-        ],
+        ]
+        if "narrow_fields" in wanted
+        else [],
         award_types=[
             TaxonomyItem(code=code, label=label) for code, label in TAXONOMY.award_types.items()
-        ],
+        ]
+        if "award_types" in wanted
+        else [],
     )
 
 

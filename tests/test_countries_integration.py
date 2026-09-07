@@ -102,6 +102,47 @@ async def test_taxonomies_separates_origins_from_destinations(db, client) -> Non
     }
 
 
+async def test_taxonomies_types_filters_to_requested_collections_only(db, client) -> None:
+    await sync_countries(db, _FakeCore([_entry("NG", "Nigeria"), _entry("CA", "Canada")]))
+    body = (
+        await client.get("/api/v1/taxonomies?types=fields&types=narrow_fields")
+    ).json()
+    assert body["fields"]
+    assert body["narrow_fields"]
+    assert body["countries"] == []
+    assert body["destinations"] == []
+    assert body["degrees"] == []
+    assert body["award_types"] == []
+
+
+async def test_taxonomies_unknown_type_is_a_422(db, client) -> None:
+    response = await client.get("/api/v1/taxonomies?types=not_a_real_type")
+    assert response.status_code == 422
+
+
+async def test_taxonomies_bracket_array_form_is_not_silently_ignored(db, client) -> None:
+    """A client that serializes arrays as `types[]=x` (a common convention
+    outside FastAPI's own repeated-key style) must still get filtered, not
+    silently fall through to the unfiltered full vocabulary."""
+    body = (await client.get("/api/v1/taxonomies?types[]=fields")).json()
+    assert body["fields"]
+    assert body["countries"] == []
+    assert body["narrow_fields"] == []
+
+
+async def test_taxonomies_empty_types_returns_the_full_vocabulary(db, client) -> None:
+    """An empty selection (`?types=`) means "no filter," same as omitting
+    `types` entirely - not an error, and not zero collections."""
+    omitted = (await client.get("/api/v1/taxonomies")).json()
+    empty_repeated = (await client.get("/api/v1/taxonomies?types=")).json()
+    empty_bracketed = (await client.get("/api/v1/taxonomies?types[]=")).json()
+    for body in (empty_repeated, empty_bracketed):
+        assert body["fields"] == omitted["fields"]
+        assert body["narrow_fields"] == omitted["narrow_fields"]
+        assert body["degrees"] == omitted["degrees"]
+        assert body["award_types"] == omitted["award_types"]
+
+
 async def test_search_accepts_any_origin_and_runs_for_covered_destinations(db, client) -> None:
     await sync_countries(db, _FakeCore([_entry("KE", "Kenya"), _entry("CA", "Canada")]))
     base = {"program_level": "phd", "field": "health_and_welfare"}
