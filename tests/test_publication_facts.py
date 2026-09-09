@@ -74,9 +74,13 @@ def test_no_expected_reopen_month_means_no_key_at_all() -> None:
     assert "expected_reopen_month" not in facts
 
 
-def test_field_names_are_stored_verbatim_deduped_and_sorted() -> None:
-    facts = _facts(field_names=["Mathematics", "mathematics", "Mathematics", "Statistics"])
-    assert facts["field_names"] == ["Mathematics", "Statistics", "mathematics"]
+def test_field_labels_and_programme_names_are_separated() -> None:
+    facts = _facts(
+        fields=["mathematics_and_statistics"],
+        field_names=["Mathematics", "mathematics", "Mathematics", "Statistics"],
+    )
+    assert facts["field_names"] == ["Mathematics and Statistics"]
+    assert facts["programme_names"] == ["Mathematics", "Statistics", "mathematics"]
 
 
 def test_no_field_names_means_no_key_at_all() -> None:

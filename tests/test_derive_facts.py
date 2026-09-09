@@ -20,7 +20,7 @@ BASE_FACTS = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["health"],
+    "fields": ["health_and_medical_sciences"],
     "evidence_fresh": True,
 }
 
@@ -53,7 +53,8 @@ def test_out_of_contract_facts_degrade_individually_not_all_at_once() -> None:
     assert derived.degree_levels == ["masters"]
     assert derived.funding_type is None
     assert derived.eligibility_note is None
-    assert derived.field_names == ["MSc Development Economics"]
+    assert derived.field_names == ["Health and Medical Sciences"]
+    assert derived.programme_names == ["MSc Development Economics"]
 
 
 def test_an_unhashable_funding_type_does_not_crash_the_membership_check() -> None:
@@ -72,7 +73,21 @@ def test_a_non_list_levels_or_field_names_does_not_crash() -> None:
         {**BASE_FACTS, "levels": "masters", "field_names": "MSc Development Economics"}
     )
     assert derived.degree_levels == []
-    assert derived.field_names == []
+    assert derived.field_names == ["Health and Medical Sciences"]
+
+
+def test_unhashable_enum_values_do_not_crash_fact_derivation() -> None:
+    derived = _derive_facts(
+        {
+            **BASE_FACTS,
+            "deadline_precision": [],
+            "origin_mode": {},
+            "field_mode": [],
+        }
+    )
+    assert derived.deadline_precision == "datetime"
+    assert derived.origin_mode == "unknown"
+    assert derived.field_mode == "unknown"
 
 
 def test_a_boolean_reopen_month_is_not_treated_as_month_one() -> None:

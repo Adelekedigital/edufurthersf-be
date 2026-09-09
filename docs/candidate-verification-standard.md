@@ -53,19 +53,17 @@ best-effort publish.
      recurrence (Commonwealth Shared Scholarships' 2026/27→2027/28 naming).
    - `status_unknown` when recurrence itself isn't evidenced.
 4. **No taxonomy-forcing.** `field_mode=unknown` when the field doesn't
-   cleanly map to a real field code. (At the time of this pass, the taxonomy
-   held only two codes - `public_health`, `computer_science` - so this was
-   true for nearly everything checked; it's since been expanded to the full
-   ISCED-F 2013 narrow-field list, 29 codes across 11 broad fields, see
-   `domain/taxonomy.py`.) `destinations` limited to the five actually
-   supported (`CA`, `GB`, `US`, `DE`, `FI`); an Erasmus Mundus-style
+    cleanly map to a real product field code. The current canonical field
+    vocabulary is the flat `taxonomy-v3` list in `domain/taxonomy.py`.
+    `destinations` includes Australia (`AU`) alongside the verified destinations
+    (`CA`, `GB`, `US`, `DE`, `FI`); an Erasmus Mundus-style
    multi-country consortium only counts if the applicant's actual study
    country is *guaranteed* to be one of those five, not merely possible.
    **Field tagging is now a required publish-time step, not an afterthought**
    (the [50-profile test](coverage-test-50-profile-2026-09-05.md) found 97/99
    published records left at `field_mode="unknown"`, which is exactly the
    silent default a skipped step produces):
-   - `field_mode="restricted"` with the specific narrow ISCED-F code(s) when
+    - `field_mode="restricted"` with the specific canonical product field code(s) when
      the source names an actual subject/discipline (a programme title like
      "MSc Development Economics" or "Doctoral scholarships in Aerospace
      Engineering" is itself sufficient evidence - no separate re-fetch

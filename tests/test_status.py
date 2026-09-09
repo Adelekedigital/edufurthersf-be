@@ -64,34 +64,34 @@ def test_open_with_no_deadline_at_all_is_just_open() -> None:
     assert detail == "open"
 
 
-def test_reopens_this_month_is_opening_soon() -> None:
+def test_reopens_this_month_is_likely_to_open() -> None:
     detail = evaluate_status_detail(
         PublicStatus.expected_to_reopen,
         deadline_at=None,
         expected_reopen_month=1,
         now=JAN_15,
     )
-    assert detail == "opening_soon"
+    assert detail == "likely_to_open"
 
 
-def test_reopens_next_month_is_still_opening_soon() -> None:
+def test_reopens_next_month_is_likely_to_open() -> None:
     detail = evaluate_status_detail(
         PublicStatus.expected_to_reopen,
         deadline_at=None,
         expected_reopen_month=2,
         now=JAN_15,
     )
-    assert detail == "opening_soon"
+    assert detail == "likely_to_open"
 
 
-def test_reopens_far_out_is_likely_to_reopen_not_opening_soon() -> None:
+def test_reopens_far_out_is_likely_to_open() -> None:
     detail = evaluate_status_detail(
         PublicStatus.expected_to_reopen,
         deadline_at=None,
         expected_reopen_month=6,
         now=JAN_15,
     )
-    assert detail == "likely_to_reopen"
+    assert detail == "likely_to_open"
 
 
 def test_reopen_month_wraps_the_calendar_year() -> None:
@@ -103,19 +103,19 @@ def test_reopen_month_wraps_the_calendar_year() -> None:
         expected_reopen_month=12,
         now=datetime(2026, 11, 20, tzinfo=UTC),
     )
-    assert detail == "opening_soon"
+    assert detail == "likely_to_open"
 
 
 def test_expected_to_reopen_without_any_reopen_evidence_is_likely_to_reopen() -> None:
     """No guessed reopen month - only a real, reviewer-captured one ever
-    produces "opening soon"."""
+    produces "likely_to_open"."""
     detail = evaluate_status_detail(
         PublicStatus.expected_to_reopen,
         deadline_at=None,
         expected_reopen_month=None,
         now=JAN_15,
     )
-    assert detail == "likely_to_reopen"
+    assert detail == "likely_to_open"
 
 
 def test_status_unknown_has_no_richer_detail() -> None:

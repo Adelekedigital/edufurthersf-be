@@ -34,8 +34,8 @@ CYCLE = {
 
 SEARCH = {
     "origin_country": "NG",
-    "program_level": "masters",
-    "field": "health_and_welfare",
+    "program_levels": ["masters"],
+    "field": "health_and_medical_sciences",
     "target_countries": ["CA"],
 }
 
@@ -87,7 +87,7 @@ async def test_publish_makes_the_scholarship_findable(db, client) -> None:
     assert [row["name"] for row in results] == ["Award A"]
 
 
-async def test_expected_reopen_month_produces_opening_soon_status_detail(db, client) -> None:
+async def test_expected_reopen_month_produces_likely_to_open_status_detail(db, client) -> None:
     """The month is dynamic (this-month, not a fixed one) so the assertion
     holds regardless of when the suite actually runs."""
     scholarship = await _approved_scholarship(db, slug="reopen-soon")
@@ -104,10 +104,10 @@ async def test_expected_reopen_month_produces_opening_soon_status_detail(db, cli
     assert response.status_code == 200, response.text
 
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
-    assert [row["status_detail"] for row in results] == ["opening_soon"]
+    assert [row["status_detail"] for row in results] == ["likely_to_open"]
 
 
-async def test_no_expected_reopen_month_is_likely_to_reopen_not_opening_soon(db, client) -> None:
+async def test_no_expected_reopen_month_is_likely_to_open(db, client) -> None:
     scholarship = await _approved_scholarship(db, slug="reopen-unknown")
     cycle = {**CYCLE, "public_status": "expected_to_reopen"}
     await client.post(
@@ -116,7 +116,7 @@ async def test_no_expected_reopen_month_is_likely_to_reopen_not_opening_soon(db,
         headers=AUTH,
     )
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
-    assert [row["status_detail"] for row in results] == ["likely_to_reopen"]
+    assert [row["status_detail"] for row in results] == ["likely_to_open"]
 
 
 async def test_publish_records_an_audit_entry_and_analytics_event(db, client) -> None:

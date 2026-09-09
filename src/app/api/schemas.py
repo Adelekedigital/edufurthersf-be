@@ -17,11 +17,7 @@ class TaxonomiesResponse(BaseModel):
     #: The subset with verified coverage, which is where a search can be run.
     destinations: list[TaxonomyItem]
     degrees: list[TaxonomyItem]
-    #: Broad ISCED-F 2013 fields (11 codes) - what a search form offers.
     fields: list[TaxonomyItem]
-    #: Narrow ISCED-F 2013 fields (29 codes) - what a scholarship is actually
-    #: tagged with at publish time; not a search filter itself.
-    narrow_fields: list[TaxonomyItem]
     award_types: list[TaxonomyItem]
     #: How much of the cost an award covers - distinct from `award_types`.
     funding_types: list[TaxonomyItem]
@@ -30,9 +26,8 @@ class TaxonomiesResponse(BaseModel):
 class SearchRequest(BaseModel):
     origin_country: str = Field(min_length=2, max_length=3)
     # Validated against the taxonomy rather than pinned here, so accepted
-    # aliases ("phd") resolve to the canonical Core-aligned code in one place.
-    program_level: str = Field(min_length=1, max_length=40)
-    #: Optional broad ISCED-F field code (see GET /taxonomies `fields`).
+    program_levels: list[str] = Field(min_length=1, max_length=3)
+    #: Optional canonical field code (see GET /taxonomies `fields`).
     #: Omit (or send null) for no field preference.
     field: str | None = Field(default=None, max_length=100)
     target_countries: list[str] = Field(min_length=1, max_length=10)
@@ -47,12 +42,7 @@ class SearchResult(BaseModel):
     provider: str
     award_type: str
     status: str
-    #: A display-only refinement of `status`: "open"/"closing_soon" for
-    #: open_verified, "opening_soon"/"likely_to_reopen" for
-    #: expected_to_reopen (the latter two distinguished only when a reviewer
-    #: has real evidence of roughly when), "status_unknown" otherwise. Never
-    #: use this in place of `status` for eligibility logic - it's presentation
-    #: detail, not the business state.
+    #: A display-only refinement of the internal public status.
     status_detail: str
     fit: Literal["confirmed", "possible"]
     official_url: str
@@ -63,12 +53,12 @@ class SearchResult(BaseModel):
     #: it as its own label, not lost inside generic matching/freshness
     #: caveats.
     eligibility_note: str | None = None
-    #: The source's own course/subject wording ("MSc Development Economics"),
-    #: alongside (never instead of) the normalised ISCED-F `fields` codes
-    #: used for matching - a distinct field for the same reason as
-    #: `eligibility_note`: a frontend shouldn't need to parse `facts` to show
-    #: the specific programme name.
+    #: Canonical product labels corresponding to `fields`.
     field_names: list[str] = Field(default_factory=list)
+    #: Canonical product field codes used for matching.
+    fields: list[str] = Field(default_factory=list)
+    #: Source/programme wording, preserved separately for display.
+    programme_names: list[str] = Field(default_factory=list)
     #: This scholarship's own destination code(s), from `facts["destinations"]`
     #: - one of the `GET /taxonomies` `destinations` codes. A frontend must
     #: not infer a result's country from the search's own `target_countries`
@@ -88,8 +78,8 @@ class SearchResult(BaseModel):
     degree_levels: list[str] = Field(default_factory=list)
     #: A cyclic month number (1-12), never a year - the source rarely commits
     #: to a specific year for "reopens around February." Pair with
-    #: `status_detail == "opening_soon"`/`"likely_to_reopen"` for copy; null
-    #: means no such evidence exists, not "unknown year."
+    #: `status_detail == "likely_to_open"` for copy; null means no such
+    #: evidence exists, not "unknown year."
     expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
     #: One of `GET /taxonomies` `funding_types`, or null when the reviewer
     #: had no evidence of coverage level. Distinct from `award_type` - see
@@ -161,7 +151,7 @@ class SearchReplayResponse(SearchResponse):
 
     meta: ReplaySearchMeta
     #: The exact filters this search ran with - Search.filters verbatim
-    #: (origin_country, target_countries, program_level, field). A superset
+    #: (origin_country, target_countries, program_levels, field). A superset
     #: of what POST /scholarships/{id}'s MatchProfileRequest declares (it has
     #: no target_countries field) but safe to pass through unmodified: that
     #: model doesn't forbid extra fields, so restoring a personalized modal

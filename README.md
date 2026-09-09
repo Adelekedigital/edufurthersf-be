@@ -407,10 +407,8 @@ plan already names for the initial dataset.
 
 ## Taxonomy and Core alignment
 
-Degree codes are ISCED-aligned to match Core's `degree_levels` slugs
-(`masters`, `doctorate`). A join intent forwards `program_level` to Core, which
-cannot resolve a code it does not hold, so the Finder accepts `phd` as an input
-alias and normalises it to `doctorate`. The user-facing label stays "PhD".
+Degree codes are Finder-owned: `masters`, `mba`, and `doctorate`. Search accepts
+multiple `program_levels` and normalizes aliases such as `phd` to `doctorate`.
 
 Countries are mirrored from Core's unauthenticated
 `GET /api/v1/catalog/countries` into the local `countries` table by the
@@ -424,27 +422,26 @@ have nothing for you yet" into "you do not exist". Destination is limited to
 `is_supported_destination`, a Finder-owned column recording verified coverage
 that the sync deliberately never overwrites.
 
-Degree levels are **not** mirrored. Core's vocabulary is four closed rows that
-users cannot add to, and the Finder deliberately offers two of them, so a
-runtime fetch would import levels the product must not offer and put a network
-call in front of four constants. The codes stay local and
+Degree levels are **not** mirrored. The Finder owns the three closed values it
+offers, so a runtime fetch cannot import levels the product must not offer. The codes stay local and
 `tests/test_core_contract.py` pins the agreement instead, failing in CI rather
 than at a handoff.
 
 Core has no field-of-study catalogue — programme names there are free text by
-design — so the field taxonomy is Finder-owned, built on ISCED-F 2013
-(UNESCO's field-of-education classification) at two tiers:
+design — so the field taxonomy is Finder-owned. `GET /api/v1/taxonomies`
+returns one flat `fields` collection of canonical code/label pairs. Search and
+published scholarship facts use the same codes; the Ebook is not a dependency.
 
-- **Broad** (11 codes, e.g. `ict`, `health_and_welfare`) — what `GET
-  /api/v1/taxonomies` offers a search form under `fields`, and what
-  `SearchRequest.field` accepts. Matches what a real searcher thinks in.
-- **Narrow** (29 codes, e.g. `ict`, `health`, `welfare`, `law`) — what a
-  scholarship is actually tagged with at publish time (`PublishCycleRequest.
-  fields`), exposed for reference under `GET /api/v1/taxonomies`'
-  `narrow_fields`. A search's broad choice is expanded to every narrow code
-  beneath it (`Taxonomy.narrow_fields_under`) before matching against a
-  scholarship's own narrow tags — see `domain/taxonomy.py` and
-  `domain/matching.py`.
+Existing cycle facts can be migrated with the audited, dry-run-first command:
+
+```powershell
+uv run python scripts/migrate_field_taxonomy.py --dry-run
+uv run python scripts/migrate_field_taxonomy.py --apply
+```
+
+Rows with unmappable legacy tags are reported and are not partially rewritten.
+Their original field codes are retained in `legacy_fields` when a migration is
+applied. Historical search snapshots retain their original taxonomy version.
 
 ## Tests
 

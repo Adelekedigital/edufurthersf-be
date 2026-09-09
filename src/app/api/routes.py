@@ -274,9 +274,7 @@ def _scholarship_admin_read(
         lifecycle_state=scholarship.lifecycle_state.value,
         provider_id=scholarship.provider_id,
         provider_name=scholarship.provider.name if scholarship.provider else "",
-        cycles=[
-            _cycle_admin_read(cycle, evaluated_at) for cycle in scholarship.cycles
-        ],
+        cycles=[_cycle_admin_read(cycle, evaluated_at) for cycle in scholarship.cycles],
     )
 
 
@@ -533,7 +531,7 @@ async def bulk_review_decision(
 
 def _search_result(
     row: ScholarshipCycle, decision: MatchDecision, evaluated_at: datetime
-) -> SearchResult:
+) -> SearchResult | None:
     """Build one public result, re-deriving status at read time.
 
     A stored `open_verified` whose deadline or freshness boundary has passed
@@ -560,6 +558,8 @@ def _search_result(
         expected_reopen_month=derived.expected_reopen_month,
         now=evaluated_at,
     )
+    if status == PublicStatus.status_unknown:
+        return None
     caveats = list(decision.caveats)
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
@@ -569,11 +569,13 @@ def _search_result(
         name=row.scholarship.name,
         provider=row.scholarship.provider.name,
         award_type=row.scholarship.award_type,
-        status=status.value,
+        status=status_detail,
         status_detail=status_detail,
         fit=cast(Literal["confirmed", "possible"], decision.fit),
         eligibility_note=derived.eligibility_note,
         field_names=derived.field_names,
+        fields=derived.fields,
+        programme_names=derived.programme_names,
         destinations=derived.destinations,
         deadline_at=derived.deadline_at,
         deadline_precision=derived.public_deadline_precision,
@@ -585,6 +587,18 @@ def _search_result(
         last_verified_at=row.last_verified_at,
         caveats=caveats,
     )
+
+
+def _result_sort_value(item: SearchResult, evaluated_at: datetime) -> tuple[int, str]:
+    """Return the secondary ordering value for the public status bucket."""
+    if item.status in {"open", "closing_soon"}:
+        deadline = item.deadline_at.isoformat() if item.deadline_at else ""
+        return (0 if item.deadline_at is not None else 1, deadline)
+    month = item.expected_reopen_month
+    if month is None:
+        return (1, "13")
+    distance = (month - evaluated_at.month) % 12
+    return (0, f"{distance:02d}")
 
 
 @router.get(
@@ -712,6 +726,7 @@ async def publish(
             eligibility_note=payload.eligibility_note,
             expected_reopen_month=payload.expected_reopen_month,
             field_names=payload.field_names,
+            programme_names=payload.programme_names,
             funding_type=payload.funding_type,
             countries=countries,
         )
@@ -817,6 +832,8 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         last_verified_at=row.last_verified_at,
         eligibility_note=derived.eligibility_note,
         field_names=derived.field_names,
+        fields=derived.fields,
+        programme_names=derived.programme_names,
         destinations=derived.destinations,
         deadline_at=derived.deadline_at,
         deadline_precision=derived.public_deadline_precision,
@@ -840,7 +857,6 @@ TAXONOMY_TYPES = frozenset(
         "destinations",
         "degrees",
         "fields",
-        "narrow_fields",
         "award_types",
         "funding_types",
     }
@@ -860,7 +876,7 @@ async def taxonomies(
     every origin while limiting where a search can be run.
 
     `types` narrows the response to just the requested collections (e.g.
-    `?types=fields&types=narrow_fields`) - omit it, or send it empty
+    `?types=fields`) - omit it, or send it empty
     (`?types=`), for the full vocabulary. Unrequested collections come back
     as empty lists, not omitted keys, so the response shape never changes.
 
@@ -902,8 +918,7 @@ async def taxonomies(
         if "destinations" in wanted
         else [],
         degrees=_taxonomy_items(TAXONOMY.degrees, "degrees", wanted),
-        fields=_taxonomy_items(TAXONOMY.broad_fields, "fields", wanted),
-        narrow_fields=_taxonomy_items(TAXONOMY.narrow_fields, "narrow_fields", wanted),
+        fields=_taxonomy_items(TAXONOMY.fields, "fields", wanted),
         award_types=_taxonomy_items(TAXONOMY.award_types, "award_types", wanted),
         funding_types=_taxonomy_items(TAXONOMY.funding_types, "funding_types", wanted),
     )
@@ -1118,13 +1133,13 @@ async def search(
             origin,
             destinations,
             uncovered_destinations,
-            degree,
+            degrees,
             field,
             accepted_fields,
         ) = normalize_search_filters(
             payload.origin_country,
             payload.target_countries,
-            payload.program_level,
+            payload.program_levels,
             payload.field,
             countries,
         )
@@ -1137,11 +1152,11 @@ async def search(
         # plainly which ones weren't, rather than silently returning fewer
         # results than requested with no explanation.
         warnings.append(f"no_verified_coverage:{','.join(sorted(uncovered_destinations))}")
-    profile = SearchProfile(origin, destinations, degree, accepted_fields)
+    profile = SearchProfile(origin, destinations, degrees, accepted_fields)
     filters = {
         "origin_country": origin,
         "target_countries": sorted(destinations),
-        "program_level": degree,
+        "program_levels": sorted(degrees),
         "field": field,
     }
     session = await get_or_create_session(db, response, request.cookies.get(SESSION_COOKIE))
@@ -1177,20 +1192,21 @@ async def search(
             extra={"request_id": getattr(request.state, "request_id", "")},
         )
     matched: list[SearchResult] = [
-        _search_result(row, decision, evaluated_at)
+        result
         for row in rows
         if (decision := evaluate_match(profile, row.facts or {})) is not None
+        and (result := _search_result(row, decision, evaluated_at)) is not None
     ]
-    status_rank = {"open_verified": 0, "expected_to_reopen": 1, "status_unknown": 2}
+    status_rank = {"open": 0, "closing_soon": 1, "likely_to_open": 2}
     # Confirmed matches outrank possible ones inside a status group. The
     # previous key sorted by negative caveat count, which put the
     # eligibility-uncertain records first.
-    fit_rank = {"confirmed": 0, "possible": 1}
     matched.sort(
         key=lambda item: (
-            fit_rank.get(item.fit, 9),
             status_rank.get(item.status, 9),
-            str(item.scholarship_id),
+            0 if item.fit == "confirmed" else 1,
+            _result_sort_value(item, evaluated_at),
+            str(item.cycle_id),
         )
     )
     confirmed_counts: dict[str, int] = {}
@@ -1345,7 +1361,7 @@ async def scholarship_detail_with_explanation(
     countries = await load_vocabulary(db)
     try:
         origin = countries.origin(payload.origin_country)
-        degree = TAXONOMY.degree(payload.program_level)
+        degrees = frozenset(TAXONOMY.degree(value) for value in payload.program_levels)
         accepted_fields = (
             TAXONOMY.narrow_fields_under(TAXONOMY.broad_field(payload.field))
             if payload.field
@@ -1361,7 +1377,7 @@ async def scholarship_detail_with_explanation(
     # decision from a raw origin_mode/field_mode this response has already
     # clamped away (e.g. "Restricted" clamped to "unknown") could otherwise
     # return fit="confirmed" right next to facts.origin_mode == "unknown".
-    profile = SearchProfile(origin, frozenset(detail.destinations), degree, accepted_fields)
+    profile = SearchProfile(origin, frozenset(detail.destinations), degrees, accepted_fields)
     decision = evaluate_match(profile, detail.facts)
     if decision is None:
         return detail
@@ -1370,7 +1386,7 @@ async def scholarship_detail_with_explanation(
         cycle=row,
         facts=detail.facts,
         origin_country=origin,
-        program_level=degree,
+        program_levels=sorted(degrees),
         field=payload.field,
         decision=decision,
     )

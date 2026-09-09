@@ -23,8 +23,8 @@ pytestmark = requires_db
 
 SEARCH = {
     "origin_country": "NG",
-    "program_level": "masters",
-    "field": "health_and_welfare",
+    "program_levels": ["masters"],
+    "field": "health_and_medical_sciences",
     "target_countries": ["CA", "GB"],
 }
 
@@ -74,7 +74,7 @@ async def test_search_returns_published_records(db, client) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert [item["name"] for item in body["data"]] == ["Award a"]
-    assert body["meta"]["confirmed_counts"] == {"open_verified": 1}
+    assert body["meta"]["confirmed_counts"] == {"open": 1}
 
 
 async def test_expired_deadline_is_never_returned_as_open(db, client) -> None:
@@ -87,9 +87,8 @@ async def test_expired_deadline_is_never_returned_as_open(db, client) -> None:
         deadline=datetime.now(UTC) - timedelta(days=1),
     )
     body = (await client.post("/api/v1/search", json=SEARCH)).json()
-    assert body["data"][0]["status"] == "status_unknown"
-    assert body["meta"]["confirmed_counts"].get("open_verified") is None
-    assert any("re-verification" in caveat for caveat in body["data"][0]["caveats"])
+    assert body["data"] == []
+    assert body["meta"]["confirmed_counts"] == {}
 
 
 async def test_confirmed_matches_rank_above_possible_ones(db, client) -> None:

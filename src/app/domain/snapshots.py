@@ -24,7 +24,7 @@ from typing import Any
 #: deadline_precision, degree_levels, expected_reopen_month, funding_type,
 #: provider_country, award_type) - all silently snapshot-excluded until now,
 #: same "listed on purpose" rule below, just never revisited.
-SNAPSHOT_SCHEMA_VERSION = "snapshot-v2"
+SNAPSHOT_SCHEMA_VERSION = "snapshot-v3"
 
 #: Every key permitted in a stored result object. A field added to the public
 #: response is absent from the snapshot until it is listed here on purpose,
@@ -43,6 +43,8 @@ ALLOWED_RESULT_KEYS = frozenset(
         "last_verified_at",
         "eligibility_note",
         "field_names",
+        "fields",
+        "programme_names",
         "destinations",
         "deadline_at",
         "deadline_precision",

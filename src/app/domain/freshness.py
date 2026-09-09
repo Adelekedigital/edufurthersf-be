@@ -102,7 +102,7 @@ def classify_bucket(
     at month granularity (deliberately - the data standard forbids turning
     an average into an exact promised date), so "opening within 7 days" vs
     "within 60 days" is approximated with the same months-until-reopen
-    heuristic `evaluate_status_detail` already uses for its "opening_soon"
+    heuristic `evaluate_status_detail` already uses for its "likely_to_open"
     display label, rather than inventing a second, disagreeing threshold
     for the same underlying signal.
     """

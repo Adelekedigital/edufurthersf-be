@@ -56,7 +56,9 @@ async def test_extract_candidate_populates_the_discoverys_extracted_facts(db) ->
         raw_excerpt="offers a £13,000 grant, deadline March 15, 2026, for Master's students.",
     )
     job, _ = await enqueue_job(
-        db, "extract_candidate", f"extract:{discovery.discovery_id}",
+        db,
+        "extract_candidate",
+        f"extract:{discovery.discovery_id}",
         {"discovery_id": str(discovery.discovery_id)},
     )
 
@@ -80,7 +82,9 @@ async def test_ai_router_unconfigured_leaves_ai_extracted_facts_null(db, monkeyp
     )
     discovery = await _discovery(db, raw_title="Award A", raw_excerpt="details")
     job, _ = await enqueue_job(
-        db, "extract_candidate", f"extract:{discovery.discovery_id}",
+        db,
+        "extract_candidate",
+        f"extract:{discovery.discovery_id}",
         {"discovery_id": str(discovery.discovery_id)},
     )
     assert await execute_job(db, job.job_id) == "completed"
@@ -99,7 +103,7 @@ async def test_ai_router_completed_outcome_populates_ai_extracted_facts(db, monk
         return AIRouterResponse(
             request_id="req-1",
             outcome=AIRouterOutcome.completed,
-            output={"field": "ict"},
+            output={"field": "technology"},
             model_policy_version="v1",
             trace_reference=None,
         )
@@ -107,12 +111,14 @@ async def test_ai_router_completed_outcome_populates_ai_extracted_facts(db, monk
     monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award B", raw_excerpt="details")
     job, _ = await enqueue_job(
-        db, "extract_candidate", f"extract:{discovery.discovery_id}",
+        db,
+        "extract_candidate",
+        f"extract:{discovery.discovery_id}",
         {"discovery_id": str(discovery.discovery_id)},
     )
     assert await execute_job(db, job.job_id) == "completed"
     await db.refresh(discovery)
-    assert discovery.ai_extracted_facts == {"field": "ict"}
+    assert discovery.ai_extracted_facts == {"field": "technology"}
 
 
 async def test_ai_router_non_completed_outcome_leaves_ai_extracted_facts_null(
@@ -138,7 +144,9 @@ async def test_ai_router_non_completed_outcome_leaves_ai_extracted_facts_null(
     monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award C", raw_excerpt="details")
     job, _ = await enqueue_job(
-        db, "extract_candidate", f"extract:{discovery.discovery_id}",
+        db,
+        "extract_candidate",
+        f"extract:{discovery.discovery_id}",
         {"discovery_id": str(discovery.discovery_id)},
     )
     assert await execute_job(db, job.job_id) == "completed"
@@ -162,7 +170,9 @@ async def test_ai_router_transport_failure_does_not_fail_extract_candidate(db, m
     monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award D", raw_excerpt="details")
     job, _ = await enqueue_job(
-        db, "extract_candidate", f"extract:{discovery.discovery_id}",
+        db,
+        "extract_candidate",
+        f"extract:{discovery.discovery_id}",
         {"discovery_id": str(discovery.discovery_id)},
     )
     assert await execute_job(db, job.job_id) == "completed"

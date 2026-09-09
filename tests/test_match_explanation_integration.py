@@ -28,11 +28,11 @@ FACTS = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["ict"],
+    "fields": ["technology"],
     "evidence_fresh": True,
 }
 
-PROFILE = {"origin_country": "NG", "program_level": "masters", "field": "ict"}
+PROFILE = {"origin_country": "NG", "program_levels": ["masters"], "field": "technology"}
 
 
 @dataclass(frozen=True)
@@ -86,9 +86,7 @@ async def test_get_never_populates_an_explanation(db, client) -> None:
 
 async def test_post_without_ai_router_configured_returns_no_explanation(db, client) -> None:
     cycle = await _publish(db)
-    response = await client.post(
-        f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE
-    )
+    response = await client.post(f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE)
     assert response.status_code == 200, response.text
     assert response.json()["match_explanation"] is None
 
@@ -127,12 +125,10 @@ async def test_a_non_matching_profile_never_calls_the_router(db, client, monkeyp
         called = True
         return "should never be reached"
 
-    monkeypatch.setattr(
-        "app.api.routes.get_match_explanation", _fake_get_match_explanation
-    )
+    monkeypatch.setattr("app.api.routes.get_match_explanation", _fake_get_match_explanation)
     response = await client.post(
         f"/api/v1/scholarships/{cycle.scholarship_id}",
-        json={**PROFILE, "program_level": "doctorate"},
+        json={**PROFILE, "program_levels": ["doctorate"]},
     )
     assert response.status_code == 200, response.text
     assert response.json()["match_explanation"] is None
@@ -283,9 +279,7 @@ async def test_match_explanation_rate_limit_returns_a_specific_code_and_retry_af
     from app.api.routes import MATCH_EXPLANATION_PER_MINUTE
 
     for _ in range(MATCH_EXPLANATION_PER_MINUTE):
-        response = await client.post(
-            f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE
-        )
+        response = await client.post(f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE)
         assert response.status_code == 200, response.text
     response = await client.post(f"/api/v1/scholarships/{cycle.scholarship_id}", json=PROFILE)
     assert response.status_code == 429

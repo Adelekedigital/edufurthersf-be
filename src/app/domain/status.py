@@ -122,6 +122,6 @@ def evaluate_status_detail(
             # further out is "likely to reopen" without a near-term signal.
             months_until_reopen = (expected_reopen_month - current.month) % 12
             if months_until_reopen <= 1:
-                return "opening_soon"
-        return "likely_to_reopen"
+                return "likely_to_open"
+        return "likely_to_open"
     return "status_unknown"

@@ -1,17 +1,15 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.domain.taxonomy import TAXONOMY
+
 
 @dataclass(frozen=True)
 class SearchProfile:
     origin_country: str
     target_countries: frozenset[str]
-    program_level: str
-    #: None means "no field preference" - never excludes a field_mode="restricted"
-    #: record, since the searcher isn't filtering on field at all. Otherwise
-    #: the set of narrow ISCED-F codes accepted for the searcher's broad
-    #: field choice (see `taxonomy.normalize_search_filters`) - a scholarship
-    #: matches if any of its own narrow-tagged fields falls in this set.
+    program_levels: frozenset[str]
+    #: None means "no field preference"; otherwise canonical product fields.
     fields: frozenset[str] | None
 
 
@@ -37,6 +35,16 @@ def _normalised_set(facts: dict[str, Any], key: str) -> set[str]:
     value = facts.get(key)
     if not isinstance(value, list):
         return set()
+    if key in {"fields", "levels"}:
+        normalized: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            try:
+                normalized.add(TAXONOMY.field(item) if key == "fields" else TAXONOMY.degree(item))
+            except ValueError:
+                continue
+        return normalized
     return {_normalise(str(v)) for v in value}
 
 
@@ -47,7 +55,9 @@ def evaluate_match(profile: SearchProfile, facts: dict[str, Any]) -> MatchDecisi
     destinations = _normalised_set(facts, "destinations")
     if not destinations.intersection({_normalise(v) for v in profile.target_countries}):
         return None
-    if _normalise(profile.program_level) not in _normalised_set(facts, "levels"):
+    if not {_normalise(v) for v in profile.program_levels}.intersection(
+        _normalised_set(facts, "levels")
+    ):
         return None
     origin_mode = facts.get("origin_mode") or "unknown"
     origins = _normalised_set(facts, "origins")

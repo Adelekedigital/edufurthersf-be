@@ -11,7 +11,7 @@ class MatchProfileRequest(BaseModel):
     since the destination is already fixed by whichever scholarship this is."""
 
     origin_country: str = Field(min_length=2, max_length=3)
-    program_level: str = Field(min_length=1, max_length=40)
+    program_levels: list[str] = Field(min_length=1, max_length=3)
     field: str | None = Field(default=None, max_length=100)
 
 
@@ -32,9 +32,10 @@ class ScholarshipDetailResponse(BaseModel):
     #: structurally - a distinct field so a frontend can render it as its
     #: own label, not lost inside generic matching/freshness caveats.
     eligibility_note: str | None = None
-    #: See `SearchResult.field_names` - the source's own course/subject
-    #: wording, alongside the normalised `facts["fields"]` codes.
+    #: Canonical product labels corresponding to `fields`.
     field_names: list[str] = Field(default_factory=list)
+    fields: list[str] = Field(default_factory=list)
+    programme_names: list[str] = Field(default_factory=list)
     #: See `SearchResult.destinations` - this award's own destination
     #: code(s), not to be inferred from a search filter.
     destinations: list[str] = Field(default_factory=list)

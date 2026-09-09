@@ -52,7 +52,7 @@ async def test_replay_returns_the_stored_page_and_filters(db, client) -> None:
     assert body["next_cursor"] is None
     # Exactly what the modal-explanation endpoint's MatchProfileRequest needs.
     assert body["filters"]["origin_country"] == SEARCH["origin_country"]
-    assert body["filters"]["program_level"] == SEARCH["program_level"]
+    assert body["filters"]["program_levels"] == SEARCH["program_levels"]
     assert body["filters"]["field"] == SEARCH["field"]
 
 
@@ -68,9 +68,7 @@ async def test_replay_reports_real_aggregate_counts_not_just_this_page(db, clien
 
 
 async def test_unknown_search_id_is_a_404(client) -> None:
-    response = await client.get(
-        "/api/v1/search/01960000-0000-7000-8000-000000000000"
-    )
+    response = await client.get("/api/v1/search/01960000-0000-7000-8000-000000000000")
     assert response.status_code == 404
 
 
@@ -209,9 +207,7 @@ async def test_a_cursor_redeemed_with_a_different_limit_is_rejected(db, client) 
     cursor = first_page["next_cursor"]
     assert cursor  # 3 matches, limit 1 -> a next page exists
 
-    response = await client.post(
-        "/api/v1/search", json={**SEARCH, "limit": 2, "cursor": cursor}
-    )
+    response = await client.post("/api/v1/search", json={**SEARCH, "limit": 2, "cursor": cursor})
     assert response.status_code == 400
 
     # The real page-one row for this specific search must be untouched by
