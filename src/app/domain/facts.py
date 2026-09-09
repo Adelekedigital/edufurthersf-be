@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from app.domain.taxonomy import TAXONOMY
 
@@ -126,7 +126,7 @@ def derive_facts(facts: dict) -> DerivedFacts:
     deadline_at = safe_deadline_at(facts.get("deadline_at"))
     raw_precision = facts.get("deadline_precision", "datetime")
     deadline_precision: Literal["date", "datetime"] = (
-        raw_precision
+        cast(Literal["date", "datetime"], raw_precision)
         if isinstance(raw_precision, str) and raw_precision in ("date", "datetime")
         else "datetime"
     )
@@ -169,14 +169,14 @@ def derive_facts(facts: dict) -> DerivedFacts:
     deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
     raw_origin_mode = facts.get("origin_mode")
     origin_mode: Literal["restricted", "unrestricted", "unknown"] = (
-        raw_origin_mode
+        cast(Literal["restricted", "unrestricted", "unknown"], raw_origin_mode)
         if isinstance(raw_origin_mode, str)
         and raw_origin_mode in ("restricted", "unrestricted", "unknown")
         else "unknown"
     )
     raw_field_mode = facts.get("field_mode")
     field_mode: Literal["restricted", "all", "unknown"] = (
-        raw_field_mode
+        cast(Literal["restricted", "all", "unknown"], raw_field_mode)
         if isinstance(raw_field_mode, str)
         and raw_field_mode in ("restricted", "all", "unknown")
         else "unknown"

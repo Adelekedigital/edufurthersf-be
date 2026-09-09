@@ -1173,7 +1173,7 @@ async def search(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         offset, search_id = cursor_state.offset, cursor_state.search_id
-    result = await db.execute(
+    query_result = await db.execute(
         select(ScholarshipCycle)
         .join(ScholarshipCycle.scholarship)
         .where(ScholarshipCycle.scholarship.has(lifecycle_state=RecordState.published))
@@ -1181,7 +1181,7 @@ async def search(
         .order_by(ScholarshipCycle.cycle_id)
         .limit(PUBLISHED_CYCLE_SCAN_LIMIT + 1)
     )
-    rows = result.scalars().all()
+    rows = query_result.scalars().all()
     if len(rows) > PUBLISHED_CYCLE_SCAN_LIMIT:
         # Matching happens in Python, so the index has outgrown one scan. Say so
         # rather than quietly returning a subset as though it were complete.
@@ -1192,10 +1192,10 @@ async def search(
             extra={"request_id": getattr(request.state, "request_id", "")},
         )
     matched: list[SearchResult] = [
-        result
+        matched_result
         for row in rows
         if (decision := evaluate_match(profile, row.facts or {})) is not None
-        and (result := _search_result(row, decision, evaluated_at)) is not None
+        and (matched_result := _search_result(row, decision, evaluated_at)) is not None
     ]
     status_rank = {"open": 0, "closing_soon": 1, "likely_to_open": 2}
     # Confirmed matches outrank possible ones inside a status group. The
