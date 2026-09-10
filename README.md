@@ -202,11 +202,33 @@ durable completion — enqueuing and returning 200 before anything ran would mea
 every delivered job sat at `queued` forever, since nothing else calls
 `execute_job`.
 
-There is deliberately no periodic sweep yet that revisits a job sitting in
-`retry_wait` past its `next_attempt_at` — that requires the recurring QStash
-schedule manifest, which remains deferred (see the release checklist). A
-transient failure on first delivery is recorded durably and visible, but is
-not automatically retried until that scheduler exists.
+A recurring `sweep_due_jobs` job now revisits everything sitting in
+`retry_wait`/`queued` past its `next_attempt_at`, on a 15-minute QStash
+schedule — the same `due_jobs()`/`execute_job()` loop `run-due` above uses
+(`execute_due_jobs()` in `app/infra/worker.py`, shared by both), running
+automatically instead of requiring someone to call the admin endpoint by
+hand. `POST /internal/admin/jobs/run-due` still exists for on-demand manual
+recovery when 15 minutes isn't fast enough.
+
+**Current deployment (development/staging, `edufurthersf-be-dev`):** a
+schedule is live, `scheduleId=scd_7SuNgcwcDH6kZTZJxUJWq9ERKJM4`, created
+2026-09-10.
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_job_sweep_schedule.py status
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_job_sweep_schedule.py pause `
+  --schedule-id scd_7SuNgcwcDH6kZTZJxUJWq9ERKJM4
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_job_sweep_schedule.py resume `
+  --schedule-id scd_7SuNgcwcDH6kZTZJxUJWq9ERKJM4
+```
+
+If the schedule is ever deleted and recreated, `create` returns a new
+`scheduleId` - update it here, same as the Parse.bot schedule note below.
 
 `QSTASH_EXPECTED_DESTINATION` is required for any deployment behind a platform
 proxy. QStash signs the public `https://` URL it was given, while the app is
@@ -415,6 +437,35 @@ Countries are mirrored from Core's unauthenticated
 `sync_countries` job. The mirror is never read through Core at request time:
 search has to keep answering while Core is down. Set `CORE_BASE_URL` to enable
 the sync; until it runs, a small built-in seed stands in.
+
+`sync_countries` runs on a weekly QStash schedule (Monday 05:00 UTC by
+default, an hour before `harvest_parsebot`) once `CORE_BASE_URL` is set -
+without it, every scheduled run fails identically, since `sync_countries`
+isn't retryable (matches `harvest_parsebot`'s precedent: a periodic
+maintenance kind, not a transient-failure-prone one). An operator can still
+force an immediate re-sync with a custom `dedupe_key` - only the schedule's
+own `"sync_countries:scheduled"` placeholder gets the recomputed
+weekly-bucket key; any other explicit key is honored as-is.
+
+**Current deployment (development/staging, `edufurthersf-be-dev`):** a
+schedule is live, `scheduleId=scd_7uDxfTc7BLkuGezoHkuhaTLDnbsg`, created
+2026-09-10.
+
+```powershell
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_sync_countries_schedule.py status
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_sync_countries_schedule.py pause `
+  --schedule-id scd_7uDxfTc7BLkuGezoHkuhaTLDnbsg
+
+railway run -s edufurthersf-be -e development -- `
+  uv run python scripts/manage_sync_countries_schedule.py resume `
+  --schedule-id scd_7uDxfTc7BLkuGezoHkuhaTLDnbsg
+```
+
+If the schedule is ever deleted and recreated, `create` returns a new
+`scheduleId` - update it here, same as the Parse.bot schedule note above.
 
 Origin and destination are separate lists. Origin accepts any country Core
 publishes — restricting it to the countries the index covers would turn "we

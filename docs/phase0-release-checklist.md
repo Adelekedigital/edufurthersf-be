@@ -74,10 +74,14 @@ QStash publish of `sync_countries` after the `/internal/jobs` fix now populates
 the mirror for real - `GET /api/v1/taxonomies` moved from the 6-country seed to
 Core's actual catalogue. That closes the loop this session opened: a delivery
 that only looked successful, then a fix for it, now verified against the real
-deployed environment rather than only against the test suite. No recurring
-schedule exists yet to invoke `sync_countries` automatically; that manifest
-remains deferred (see below), so a stale mirror still needs a manual republish
-until it is built.
+deployed environment rather than only against the test suite. A weekly
+recurring schedule now invokes `sync_countries` automatically - see "Taxonomy
+and Core alignment" in the README for the live `scheduleId` - so a manual
+republish is only needed for an urgent out-of-band refresh, not routine
+freshness. The equivalent gap for retrying due jobs generally (see the "no
+periodic sweep yet" note this checklist used to carry) is also closed: a
+`sweep_due_jobs` recurring schedule now runs the same loop `POST
+/internal/admin/jobs/run-due` always could, automatically every 15 minutes.
 
 A second, deeper instance of the same class of bug surfaced loading the first
 real dataset: 247 rows imported cleanly, but `GET /internal/admin/reviews`
