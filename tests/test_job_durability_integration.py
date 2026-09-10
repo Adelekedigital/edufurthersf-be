@@ -211,3 +211,44 @@ async def test_the_worker_runs_the_maintenance_kinds(db) -> None:
         assert await execute_job(db, job.job_id) == "completed"
         stored = await db.scalar(select(ProcessingJob).where(ProcessingJob.job_id == job.job_id))
         assert stored.state == "completed"
+
+
+async def test_sweep_due_jobs_executes_every_currently_due_job(db) -> None:
+    """The scheduled counterpart to the manual run-due admin route: a
+    sweep_due_jobs job must pick up every other job already due and run it,
+    the same due_jobs()/execute_job() loop run-due uses."""
+    from app.infra.worker import execute_job
+
+    first, _ = await enqueue_job(db, "dispatch_outbox", "sweep-target-1", {})
+    second, _ = await enqueue_job(db, "reconcile_stuck_jobs", "sweep-target-2", {})
+    sweep, _ = await enqueue_job(db, "sweep_due_jobs", "sweep-1", {})
+
+    assert await execute_job(db, sweep.job_id) == "completed"
+
+    for job in (first, second):
+        await db.refresh(job)
+        assert job.state == "completed"
+    assert await due_jobs(db) == []
+
+
+async def test_execute_due_jobs_continues_past_a_failing_job(db) -> None:
+    """One job's failure must not abort the batch, and must be reflected in
+    the failed count rather than silently absorbed."""
+    from app.infra.worker import execute_due_jobs
+
+    failing, _ = await enqueue_job(
+        db,
+        "normalize_discovery",
+        "sweep-failing-1",
+        {"discovery_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    healthy, _ = await enqueue_job(db, "dispatch_outbox", "sweep-healthy-1", {})
+
+    completed, failed = await execute_due_jobs(db)
+
+    assert completed == 1
+    assert failed == 1
+    await db.refresh(failing)
+    await db.refresh(healthy)
+    assert failing.state == "failed_review"  # normalize_discovery isn't retryable
+    assert healthy.state == "completed"

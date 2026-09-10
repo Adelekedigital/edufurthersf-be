@@ -54,6 +54,20 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
     `meta.confirmed_counts`/`possible_match_count` are now nullable on the
     shared meta shape - only ever `null` on a `GET` replay of a search made
     before this endpoint shipped, never on `POST /search` itself.
+11. **`GET`/`POST /scholarships/{identifier}`'s `status` field changed** -
+    it now returns the same display-refined value `/search` does
+    (`open`/`closing_soon`/`likely_to_open`/`status_unknown`), not the raw
+    internal state (`open_verified`/`expected_to_reopen`/`status_unknown`)
+    it returned before. If you were branching on the old raw values from the
+    detail endpoint specifically, update that logic - `status_detail` is
+    unchanged and was already this display value on both endpoints.
+12. **`/search` result ordering is now a global guarantee, not a per-status
+    one** - a confirmed match always sorts above every possible match,
+    regardless of which of their status buckets (open/closing_soon/
+    likely_to_open) sorts earlier. Previously a possible match in an
+    earlier-sorting bucket (e.g. `open`) could appear above a confirmed
+    match in a later one (e.g. `closing_soon`); don't rely on the old
+    ordering if you built anything around it.
 
 ## `GET /taxonomies`
 
@@ -116,8 +130,8 @@ back to the full vocabulary when populated.
     {
       "scholarship_id": "...", "cycle_id": "...",
       "name": "...", "provider": "...", "award_type": "scholarship",
-      "status": "open_verified",        // "open_verified" | "expected_to_reopen" | "status_unknown" - the business state
-      "status_detail": "closing_soon",  // presentation refinement, see below - never use for eligibility logic
+      "status": "closing_soon",         // "open" | "closing_soon" | "likely_to_open" - display value, see "status vs status_detail" below
+      "status_detail": "closing_soon",  // same display value today - never use either for eligibility logic
       "fit": "confirmed",               // "confirmed" | "possible"
       "official_url": "https://...",
       "last_verified_at": "2026-08-01T00:00:00Z",
@@ -129,7 +143,7 @@ back to the full vocabulary when populated.
       "deadline_at": "2026-12-31T00:00:00Z", // null when rolling/not yet set
       "deadline_precision": "date", // "date" | "datetime" | null (null iff deadline_at is null) - "date" means don't render a time of day
       "degree_levels": ["masters"], // GET /taxonomies `degrees` codes this cycle accepts
-      "expected_reopen_month": null, // 1-12, cyclic - never a year. Only meaningful with status "expected_to_reopen"
+      "expected_reopen_month": null, // 1-12, cyclic - never a year. Only meaningful with status "likely_to_open"
       "funding_type": "fully_funded", // one of GET /taxonomies `funding_types`, or null - see "Funding type" below
       "provider_country": "GB", // where the *provider* is based, or null - see "Provider country" below. NOT the study destination
       "caveats": ["Some eligibility conditions need checking."]
@@ -179,7 +193,7 @@ for the search form.
   (e.g. `["masters", "doctorate"]`) - not the same taxonomy as `fields`.
 - `expected_reopen_month`: a bare month number, 1-12, cyclic - there is no
   year in the data (`"reopens around February"`, not a specific date), so
-  don't render one. Only meaningful when `status` is `"expected_to_reopen"`;
+  don't render one. Only meaningful when `status` is `"likely_to_open"`;
   null otherwise.
 
 ### Funding type
@@ -218,19 +232,27 @@ the data backfill; the previous ISCED-F coverage report is historical.
 
 ### status vs status_detail
 
-Normal search results expose only the user-facing `status` values
-`open`, `closing_soon`, and `likely_to_open`. Internal records may retain
-`open_verified`, `expected_to_reopen`, or `status_unknown`; status-unknown
-records are excluded from normal search results.
-`status_detail` mirrors the display refinement:
+Both `/search` results and the `GET`/`POST /scholarships/{identifier}`
+detail response expose only the user-facing `status` values `open`,
+`closing_soon`, and `likely_to_open` (plus `status_unknown`, detail only -
+see below). Internal records may retain `open_verified`,
+`expected_to_reopen`, or `status_unknown`; `status_detail` mirrors the same
+display refinement as `status` on both endpoints today:
 
 - `open_verified` -> `"open"` normally, `"closing_soon"` inside 14 days of
   the deadline.
 - `expected_to_reopen` -> `"likely_to_open"`.
-- anything else is not returned by normal search.
 
-Use `status_detail` for wording/badges only. Eligibility and filtering key off
-the internal evaluated state before the public result is built.
+**`status_unknown` is search-only-excluded, not detail-only-excluded**: a
+record whose internal state evaluates to `status_unknown` is dropped from
+`/search` results entirely, but the detail endpoint still returns it (with
+`status`/`status_detail` both `"status_unknown"`) for a direct/shared link -
+handle that value on the detail page even though you'll never see it from a
+search result card.
+
+Use `status`/`status_detail` for wording/badges only. Eligibility and
+filtering key off the internal evaluated state before the public result is
+built.
 
 ### Pagination
 

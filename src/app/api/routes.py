@@ -77,7 +77,7 @@ from app.infra.core_client import CoreJoinClient
 from app.infra.countries import load_vocabulary
 from app.infra.db import get_db
 from app.infra.ingestion import import_feed_records
-from app.infra.jobs import count_due_jobs, due_jobs, enqueue_job
+from app.infra.jobs import count_due_jobs, enqueue_job
 from app.infra.match_explanations import get_match_explanation
 from app.infra.outbox import enqueue_analytics_event
 from app.infra.providers import create_provider, list_providers
@@ -94,7 +94,7 @@ from app.infra.sessions import (
 )
 from app.infra.sources import create_source, deactivate_source, list_sources
 from app.infra.withdrawals import withdraw_scholarship
-from app.infra.worker import execute_job
+from app.infra.worker import execute_due_jobs, execute_job
 
 logger = logging.getLogger("app.api")
 router = APIRouter()
@@ -381,13 +381,19 @@ def _parse_job(raw_body: bytes) -> JobRequest:
 #: that job's current state without re-running it"). Recomputing a
 #: week-scoped key here, ignoring the delivered payload's own dedupe_key,
 #: keeps same-week retries idempotent while letting next week run for real.
-RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot"})
+#: sync_countries joins harvest_parsebot here, not the quarter-hour set below
+#: - Core's country list changes rarely, and (unlike harvest_parsebot) we're
+#: not trying to run this sub-weekly, so the week-scoped key has no cadence
+#: bug for it.
+RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot", "sync_countries"})
 #: Same static-body-recurring-schedule pattern as RECURRING_WEEKLY_KINDS,
 #: just finer-grained: the data-verification standard calls for a sweep at
 #: least every 15 minutes, so a QStash *schedule* redelivers a static body
 #: on that cadence and this recomputes a fresh dedupe key each quarter-hour
 #: rather than deduping every delivery after the first-ever one forever.
-RECURRING_QUARTER_HOUR_KINDS = frozenset({"refresh_status", "reverify_due"})
+#: sweep_due_jobs joins refresh_status/reverify_due here so a job sitting in
+#: retry_wait actually gets retried automatically once its backoff elapses.
+RECURRING_QUARTER_HOUR_KINDS = frozenset({"refresh_status", "reverify_due", "sweep_due_jobs"})
 
 
 def _weekly_dedupe_key(kind: str) -> str:
@@ -422,13 +428,18 @@ async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobR
     """
     if kind not in ALLOWED_JOB_KINDS:
         raise HTTPException(status_code=404, detail="Unknown job kind")
-    dedupe_key = (
-        _weekly_dedupe_key(kind)
-        if kind in RECURRING_WEEKLY_KINDS
-        else _quarter_hour_dedupe_key(kind)
-        if kind in RECURRING_QUARTER_HOUR_KINDS
-        else job_request.dedupe_key
-    )
+    # Every manage_*_schedule.py script's static body carries this exact
+    # placeholder, so only *that* delivery gets its dedupe_key recomputed
+    # server-side. An operator publishing a recurring kind with their own
+    # explicit dedupe_key (e.g. to force an out-of-band re-sync mid-week) is
+    # honored as-is instead of being silently collapsed into the same
+    # recurring bucket the schedule already ran this week/quarter-hour.
+    dedupe_key = job_request.dedupe_key
+    if dedupe_key == f"{kind}:scheduled":
+        if kind in RECURRING_WEEKLY_KINDS:
+            dedupe_key = _weekly_dedupe_key(kind)
+        elif kind in RECURRING_QUARTER_HOUR_KINDS:
+            dedupe_key = _quarter_hour_dedupe_key(kind)
     job, created = await enqueue_job(db, kind, dedupe_key, job_request.payload)
     now = datetime.now(UTC)
     eligible = job.state in (JobState.queued.value, JobState.retry_wait.value) and (
@@ -778,19 +789,14 @@ async def run_due_jobs_route(
     normalize_discovery/link_canonical jobs, most concretely - is never
     delivered to QStash, so nothing else in this service executes it; only a
     real QStash delivery to /internal/jobs runs a job. This is the stopgap for
-    that gap until jobs are published to QStash on creation, and it doubles as
-    manual recovery once the recurring schedule that would otherwise call this
-    automatically exists. Safe to call repeatedly: a job already completed, or
-    not yet due for retry, is simply not selected again.
+    that gap until jobs are published to QStash on creation. The
+    sweep_due_jobs recurring kind now calls the same execute_due_jobs() loop
+    automatically every 15 minutes; this route stays as on-demand manual
+    recovery for whenever that's not fast enough. Safe to call repeatedly: a
+    job already completed, or not yet due for retry, is simply not selected
+    again.
     """
-    jobs = await due_jobs(db, limit=limit)
-    completed = failed = 0
-    for job in jobs:
-        try:
-            await execute_job(db, job.job_id)
-            completed += 1
-        except Exception:
-            failed += 1
+    completed, failed = await execute_due_jobs(db, limit=limit)
     remaining = await count_due_jobs(db)
     return RunDueJobsResponse(completed=completed, failed=failed, remaining=remaining)
 

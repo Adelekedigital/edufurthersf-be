@@ -17,6 +17,7 @@ RETRYABLE_KINDS = {
     "dispatch_outbox",
     "refresh_status",
     "reverify_due",
+    "sweep_due_jobs",
 }
 
 
