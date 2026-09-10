@@ -99,6 +99,26 @@ async def test_confirmed_matches_rank_above_possible_ones(db, client) -> None:
     assert body["meta"]["possible_match_count"] == 1
 
 
+async def test_confirmed_still_ranks_above_possible_across_status_buckets(db, client) -> None:
+    """A closing_soon confirmed match is still a live, matched award - it
+    must outrank an open-but-uncertain possible match, even though "open"
+    sorts before "closing_soon" within the same fit tier."""
+    await _publish(
+        db, slug="possible-open", facts=POSSIBLE_FACTS, status=PublicStatus.open_verified
+    )
+    await _publish(
+        db,
+        slug="confirmed-closing-soon",
+        facts=CONFIRMED_FACTS,
+        status=PublicStatus.open_verified,
+        deadline=datetime.now(UTC) + timedelta(days=7),
+    )
+    body = (await client.post("/api/v1/search", json=SEARCH)).json()
+    assert [item["fit"] for item in body["data"]] == ["confirmed", "possible"]
+    assert body["data"][0]["status_detail"] == "closing_soon"
+    assert body["data"][1]["status_detail"] == "open"
+
+
 async def test_search_persists_the_session_and_search(db, client) -> None:
     """The row must survive the request; nothing downstream works otherwise."""
     response = await client.post("/api/v1/search", json=SEARCH)

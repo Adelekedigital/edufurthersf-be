@@ -97,8 +97,9 @@ def build_cycle_facts(
         facts["expected_reopen_month"] = expected_reopen_month
     if normalized_fields:
         facts["field_names"] = [TAXONOMY.fields[value] for value in normalized_fields]
+    programme_name_source = programme_names if programme_names is not None else field_names or []
     normalized_programme_names = sorted(
-        {name.strip() for name in (programme_names or field_names or []) if name.strip()}
+        {name.strip() for name in programme_name_source if name.strip()}
     )
     if normalized_programme_names:
         facts["programme_names"] = normalized_programme_names

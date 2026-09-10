@@ -1,6 +1,10 @@
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.domain.countries import SEED_COUNTRIES, SUPPORTED_DESTINATIONS, CountryVocabulary
+
+logger = logging.getLogger("app.domain.taxonomy")
 
 
 @dataclass(frozen=True)
@@ -33,14 +37,31 @@ class Taxonomy:
         return code
 
     def normalize_fields(self, values: list[str]) -> tuple[list[str], list[str]]:
-        """Return canonical field codes and values that need manual review."""
+        """Return canonical field codes and values that need manual review.
+
+        Logs unmapped values so a call site that only consumes the canonical
+        half doesn't drop an orphaned/pre-migration code with zero signal.
+        """
+        return self._normalize_codes(values, self.field, kind="field")
+
+    def normalize_degrees(self, values: list[str]) -> tuple[list[str], list[str]]:
+        """Same contract as normalize_fields, for degree-level codes."""
+        return self._normalize_codes(values, self.degree, kind="degree")
+
+    def _normalize_codes(
+        self, values: list[str], resolver: Callable[[str], str], *, kind: str
+    ) -> tuple[list[str], list[str]]:
         canonical: set[str] = set()
         unmapped: set[str] = set()
         for value in values:
             try:
-                canonical.add(self.field(value))
+                canonical.add(resolver(value))
             except ValueError:
                 unmapped.add(value)
+        if unmapped:
+            logger.warning(
+                "taxonomy_unmapped_values", extra={"kind": kind, "values": sorted(unmapped)}
+            )
         return sorted(canonical), sorted(unmapped)
 
     def broad_field(self, value: str) -> str:
@@ -108,6 +129,7 @@ TAXONOMY = Taxonomy(
         "journalism_and_information": "social_sciences",
         "engineering_trades": "engineering",
         "engineering_manufacturing_construction": "engineering",
+        "manufacturing_and_processing": "engineering",
         "architecture_and_construction": "engineering",
         "physical_sciences": "natural_sciences",
         "biological_sciences": "natural_sciences",
@@ -118,6 +140,7 @@ TAXONOMY = Taxonomy(
         "fisheries": "agriculture_and_food_systems",
         "veterinary": "agriculture_and_food_systems",
         "agriculture_forestry_fisheries_veterinary": "agriculture_and_food_systems",
+        "arts_and_humanities": "arts_humanities_and_design",
         "arts": "arts_humanities_and_design",
         "humanities": "arts_humanities_and_design",
         "languages": "arts_humanities_and_design",

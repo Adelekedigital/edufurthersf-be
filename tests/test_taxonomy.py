@@ -31,6 +31,29 @@ def test_new_field_codes_are_accepted() -> None:
     assert TAXONOMY.narrow_fields_under("technology") == {"technology"}
 
 
+def test_new_orphaned_field_aliases_normalize_to_canonical_codes() -> None:
+    assert TAXONOMY.field("manufacturing_and_processing") == "engineering"
+    assert TAXONOMY.field("arts_and_humanities") == "arts_humanities_and_design"
+
+
+def test_normalize_fields_reports_unmapped_values_without_raising() -> None:
+    canonical, unmapped = TAXONOMY.normalize_fields(["technology", "personal_services", "cs"])
+    assert canonical == ["technology"]
+    assert unmapped == ["personal_services"]
+
+
+def test_normalize_fields_logs_unmapped_values(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING", logger="app.domain.taxonomy"):
+        TAXONOMY.normalize_fields(["personal_services"])
+    assert any(record.message == "taxonomy_unmapped_values" for record in caplog.records)
+
+
+def test_normalize_degrees_reports_unmapped_values_without_raising() -> None:
+    canonical, unmapped = TAXONOMY.normalize_degrees(["masters", "postdoc"])
+    assert canonical == ["masters"]
+    assert unmapped == ["postdoc"]
+
+
 def test_unknown_country_is_rejected() -> None:
     with pytest.raises(ValueError):
         normalize_search_filters("NG", ["ZZ"], ["masters"], "technology", VOCAB)

@@ -824,7 +824,7 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
         name=row.scholarship.name,
         provider=row.scholarship.provider.name,
         award_type=row.scholarship.award_type,
-        status=status.value,
+        status=status_detail,
         status_detail=status_detail,
         status_valid_until=row.status_valid_until,
         official_url=row.official_cycle_url,
@@ -1198,13 +1198,16 @@ async def search(
         and (matched_result := _search_result(row, decision, evaluated_at)) is not None
     ]
     status_rank = {"open": 0, "closing_soon": 1, "likely_to_open": 2}
-    # Confirmed matches outrank possible ones inside a status group. The
-    # previous key sorted by negative caveat count, which put the
-    # eligibility-uncertain records first.
+    # Confirmed matches always outrank possible ones, globally - not just
+    # within the same status bucket. A closing_soon confirmed match is still
+    # a live, matched award a searcher should see before an open-but-
+    # uncertain possible one; status/deadline only order results within
+    # each fit tier. The previous key sorted status ahead of fit, which let
+    # a possible/open result outrank a confirmed/closing_soon one.
     matched.sort(
         key=lambda item: (
-            status_rank.get(item.status, 9),
             0 if item.fit == "confirmed" else 1,
+            status_rank.get(item.status, 9),
             _result_sort_value(item, evaluated_at),
             str(item.cycle_id),
         )
@@ -1362,11 +1365,8 @@ async def scholarship_detail_with_explanation(
     try:
         origin = countries.origin(payload.origin_country)
         degrees = frozenset(TAXONOMY.degree(value) for value in payload.program_levels)
-        accepted_fields = (
-            TAXONOMY.narrow_fields_under(TAXONOMY.broad_field(payload.field))
-            if payload.field
-            else None
-        )
+        normalized_field = TAXONOMY.field(payload.field) if payload.field else None
+        accepted_fields = frozenset({normalized_field}) if normalized_field else None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # detail.facts is the same sanitized dict _detail() already built via

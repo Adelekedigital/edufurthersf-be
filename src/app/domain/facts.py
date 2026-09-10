@@ -183,23 +183,18 @@ def derive_facts(facts: dict) -> DerivedFacts:
     )
     raw_evidence_fresh = facts.get("evidence_fresh")
     evidence_fresh = raw_evidence_fresh if isinstance(raw_evidence_fresh, bool) else False
-    canonical_fields = [
-        normalized
-        for value in string_list(facts.get("fields", []))
-        for normalized in _canonical_fields(value)
-    ]
+    canonical_fields, _unmapped_fields = TAXONOMY.normalize_fields(
+        string_list(facts.get("fields", []))
+    )
+    canonical_degrees, _unmapped_degrees = TAXONOMY.normalize_degrees(
+        string_list(facts.get("levels", []))
+    )
     programme_names = string_list(facts.get("programme_names", []))
-    if not programme_names:
-        programme_names = string_list(facts.get("field_names", []))
     return DerivedFacts(
         deadline_at=deadline_at,
         deadline_precision=deadline_precision,
         deadline_timezone=deadline_timezone,
-        degree_levels=[
-            normalized
-            for value in string_list(facts.get("levels", []))
-            for normalized in _canonical_degrees(value)
-        ],
+        degree_levels=canonical_degrees,
         expected_reopen_month=expected_reopen_month,
         funding_type=funding_type,
         destinations=destinations,
@@ -212,17 +207,3 @@ def derive_facts(facts: dict) -> DerivedFacts:
         fields=canonical_fields,
         evidence_fresh=evidence_fresh,
     )
-
-
-def _canonical_fields(value: str) -> list[str]:
-    try:
-        return [TAXONOMY.field(value)]
-    except ValueError:
-        return []
-
-
-def _canonical_degrees(value: str) -> list[str]:
-    try:
-        return [TAXONOMY.degree(value)]
-    except ValueError:
-        return []

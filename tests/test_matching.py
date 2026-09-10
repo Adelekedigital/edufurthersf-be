@@ -1,3 +1,5 @@
+import pytest
+
 from app.domain.matching import SearchProfile, evaluate_match
 
 
@@ -136,3 +138,23 @@ def test_legacy_field_values_are_normalized_during_transition() -> None:
         )
         is not None
     )
+
+
+def test_an_unmappable_field_value_is_observable_not_silently_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An orphaned/unmapped field code in facts["fields"] must be logged,
+    not just silently excluded from the matched set."""
+    with caplog.at_level("WARNING", logger="app.domain.taxonomy"):
+        decision = evaluate_match(
+            profile(),
+            {
+                "destinations": ["CA"],
+                "levels": ["masters"],
+                "origin_mode": "unrestricted",
+                "field_mode": "restricted",
+                "fields": ["personal_services", "health"],
+            },
+        )
+    assert decision is not None
+    assert any(record.message == "taxonomy_unmapped_values" for record in caplog.records)

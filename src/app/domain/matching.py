@@ -36,15 +36,10 @@ def _normalised_set(facts: dict[str, Any], key: str) -> set[str]:
     if not isinstance(value, list):
         return set()
     if key in {"fields", "levels"}:
-        normalized: set[str] = set()
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            try:
-                normalized.add(TAXONOMY.field(item) if key == "fields" else TAXONOMY.degree(item))
-            except ValueError:
-                continue
-        return normalized
+        string_items = [item for item in value if isinstance(item, str)]
+        normalize = TAXONOMY.normalize_fields if key == "fields" else TAXONOMY.normalize_degrees
+        canonical, _unmapped = normalize(string_items)
+        return set(canonical)
     return {_normalise(str(v)) for v in value}
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -273,6 +273,30 @@ async def test_search_result_exposes_deadline_and_degree_levels(db, client) -> N
     assert detail["deadline_at"].startswith("2026-12-31")
     assert detail["deadline_precision"] == "date"
     assert detail["degree_levels"] == ["masters"]
+
+
+async def test_detail_status_matches_the_display_refined_value_search_uses(db, client) -> None:
+    """_detail()'s `status` must show the same display-refined value
+    (open/closing_soon/likely_to_open/status_unknown) _search_result()
+    already does, not the raw PublicStatus enum."""
+    scholarship = await _approved_scholarship(db, slug="status-parity")
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={
+            **CYCLE,
+            "deadline_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
+            "deadline_precision": "datetime",
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["status"] == "closing_soon"
+    assert detail["status_detail"] == "closing_soon"
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["status"] == detail["status"]
 
 
 async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) -> None:

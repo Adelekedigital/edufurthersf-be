@@ -100,9 +100,10 @@ def evaluate_status_detail(
     authoritative business state everything else - matching, confirmed
     counts, re-verification caveats - is computed from. This only adds the
     granularity a searcher actually wants to see: "open" vs. "closing soon"
-    for a live deadline, and "likely to reopen" vs. "opening soon" for a
-    recurring scheme, when a reviewer has actually captured evidence of
-    roughly when (`expected_reopen_month`). Call with the *already
+    for a live deadline. An `expected_to_reopen` cycle always shows as
+    "likely to reopen" - `expected_reopen_month` is kept as a parameter for
+    signature stability and because every caller already has it computed,
+    but it doesn't change this detail value. Call with the *already
     re-evaluated* `status` (from `evaluate_public_status`), not the raw
     stored value, so a lapsed "open_verified" is never shown as "closing
     soon" after it has, in fact, already closed.
@@ -117,11 +118,5 @@ def evaluate_status_detail(
                 return "closing_soon"
         return "open"
     if status == PublicStatus.expected_to_reopen:
-        if expected_reopen_month is not None:
-            # 0 = reopens this month, 1 = reopens next month - anything
-            # further out is "likely to reopen" without a near-term signal.
-            months_until_reopen = (expected_reopen_month - current.month) % 12
-            if months_until_reopen <= 1:
-                return "likely_to_open"
         return "likely_to_open"
     return "status_unknown"

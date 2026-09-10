@@ -301,3 +301,27 @@ async def test_an_invalid_profile_field_is_a_422(db, client) -> None:
         json={**PROFILE, "field": "astrophysics"},
     )
     assert response.status_code == 422
+
+
+async def test_a_legacy_field_alias_still_resolves_the_field_filter(
+    db, client, monkeypatch
+) -> None:
+    """Field-filter resolution here goes through the same TAXONOMY.field() +
+    frozenset pattern normalize_search_filters uses for /search, not the
+    narrow_fields_under(broad_field(...)) shim chain - pins alias
+    resolution across that refactor."""
+    cycle = await _publish(db)  # FACTS: fields=["technology"], field_mode="restricted"
+    captured_fit = None
+
+    async def _fake_get_match_explanation(*args, decision, **kwargs):
+        nonlocal captured_fit
+        captured_fit = decision.fit
+        return None
+
+    monkeypatch.setattr("app.api.routes.get_match_explanation", _fake_get_match_explanation)
+    response = await client.post(
+        f"/api/v1/scholarships/{cycle.scholarship_id}",
+        json={**PROFILE, "field": "ict"},  # legacy alias for "technology"
+    )
+    assert response.status_code == 200, response.text
+    assert captured_fit == "confirmed"
