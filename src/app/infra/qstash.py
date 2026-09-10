@@ -155,5 +155,6 @@ ALLOWED_JOB_KINDS = frozenset(
         "reconcile_stuck_jobs",
         "sync_countries",
         "harvest_parsebot",
+        "sweep_due_jobs",
     }
 )

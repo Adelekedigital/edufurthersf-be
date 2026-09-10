@@ -108,12 +108,20 @@ def _due_predicate(now: datetime):
 
 
 async def due_jobs(db: AsyncSession, *, limit: int = 100) -> list[ProcessingJob]:
-    """Jobs that are queued, or waiting and now past their backoff."""
+    """Jobs that are queued, or waiting and now past their backoff.
+
+    `with_for_update(skip_locked=True)` matters now that both the scheduled
+    sweep_due_jobs kind and the manual run-due admin route call this: without
+    it, two concurrent callers can select the same due row and race to claim
+    it, with the loser reporting a spurious failure instead of simply never
+    seeing a row another caller already took.
+    """
     rows = await db.scalars(
         select(ProcessingJob)
         .where(*_due_predicate(datetime.now(UTC)))
         .order_by(ProcessingJob.job_id)
         .limit(limit)
+        .with_for_update(skip_locked=True)
     )
     return list(rows)
 

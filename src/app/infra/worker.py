@@ -33,6 +33,7 @@ from app.infra.ingestion import import_feed_records
 from app.infra.jobs import (
     claim_job_for_execution,
     complete_job,
+    due_jobs,
     fail_job_for_execution,
     reconcile_stuck_jobs,
 )
@@ -58,6 +59,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await dispatch_analytics_events(db)
         elif job.kind == "reconcile_stuck_jobs":
             await reconcile_stuck_jobs(db)
+        elif job.kind == "sweep_due_jobs":
+            await _sweep_due_jobs(db)
         elif job.kind == "sync_countries":
             await _sync_countries(db)
         elif job.kind == "extract_candidate":
@@ -93,6 +96,43 @@ async def _normalize_discovery(db: AsyncSession, payload: dict) -> None:
     discovery.normalized_identity_key = normalized.identity_key
     discovery.processing_state = "normalized"
     await db.commit()
+
+
+async def execute_due_jobs(db: AsyncSession, *, limit: int = 200) -> tuple[int, int]:
+    """Execute every job currently due, returning (completed, failed) counts.
+
+    Shared by the manual run-due admin route and the scheduled sweep_due_jobs
+    job kind, so both get the same rollback handling and failure counting
+    instead of drifting into two independently maintained copies. By the
+    time the scheduled kind runs this, execute_job has already claimed that
+    sweep job itself (state -> running), so due_jobs() can never re-select
+    it here.
+    """
+    completed = failed = 0
+    for due in await due_jobs(db, limit=limit):
+        try:
+            await execute_job(db, due.job_id)
+            completed += 1
+        except Exception:
+            failed += 1
+            # execute_job's own failure path already tried to commit a
+            # recorded failure; if that commit itself failed (a real DB
+            # error, not just the job's own logic raising), the session is
+            # left needing an explicit rollback, or every job after this one
+            # in the batch raises on a poisoned session instead of running.
+            await db.rollback()
+    return completed, failed
+
+
+async def _sweep_due_jobs(db: AsyncSession) -> None:
+    """The scheduled counterpart to the manual run-due admin route - same
+    execute_due_jobs() loop, running automatically instead of requiring
+    someone to call the admin endpoint by hand."""
+    completed, failed = await execute_due_jobs(db)
+    if failed:
+        logger.warning(
+            "sweep_due_jobs_had_failures", extra={"completed": completed, "failed": failed}
+        )
 
 
 async def _sync_countries(db: AsyncSession) -> None:
