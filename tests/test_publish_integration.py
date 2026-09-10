@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -34,8 +34,8 @@ CYCLE = {
 
 SEARCH = {
     "origin_country": "NG",
-    "program_level": "masters",
-    "field": "health_and_welfare",
+    "program_levels": ["masters"],
+    "field": "health_and_medical_sciences",
     "target_countries": ["CA"],
 }
 
@@ -87,7 +87,7 @@ async def test_publish_makes_the_scholarship_findable(db, client) -> None:
     assert [row["name"] for row in results] == ["Award A"]
 
 
-async def test_expected_reopen_month_produces_opening_soon_status_detail(db, client) -> None:
+async def test_expected_reopen_month_produces_likely_to_open_status_detail(db, client) -> None:
     """The month is dynamic (this-month, not a fixed one) so the assertion
     holds regardless of when the suite actually runs."""
     scholarship = await _approved_scholarship(db, slug="reopen-soon")
@@ -104,10 +104,10 @@ async def test_expected_reopen_month_produces_opening_soon_status_detail(db, cli
     assert response.status_code == 200, response.text
 
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
-    assert [row["status_detail"] for row in results] == ["opening_soon"]
+    assert [row["status_detail"] for row in results] == ["likely_to_open"]
 
 
-async def test_no_expected_reopen_month_is_likely_to_reopen_not_opening_soon(db, client) -> None:
+async def test_no_expected_reopen_month_is_likely_to_open(db, client) -> None:
     scholarship = await _approved_scholarship(db, slug="reopen-unknown")
     cycle = {**CYCLE, "public_status": "expected_to_reopen"}
     await client.post(
@@ -116,7 +116,7 @@ async def test_no_expected_reopen_month_is_likely_to_reopen_not_opening_soon(db,
         headers=AUTH,
     )
     results = (await client.post("/api/v1/search", json=SEARCH)).json()["data"]
-    assert [row["status_detail"] for row in results] == ["likely_to_reopen"]
+    assert [row["status_detail"] for row in results] == ["likely_to_open"]
 
 
 async def test_publish_records_an_audit_entry_and_analytics_event(db, client) -> None:
@@ -273,6 +273,30 @@ async def test_search_result_exposes_deadline_and_degree_levels(db, client) -> N
     assert detail["deadline_at"].startswith("2026-12-31")
     assert detail["deadline_precision"] == "date"
     assert detail["degree_levels"] == ["masters"]
+
+
+async def test_detail_status_matches_the_display_refined_value_search_uses(db, client) -> None:
+    """_detail()'s `status` must show the same display-refined value
+    (open/closing_soon/likely_to_open/status_unknown) _search_result()
+    already does, not the raw PublicStatus enum."""
+    scholarship = await _approved_scholarship(db, slug="status-parity")
+    response = await client.post(
+        f"/api/v1/internal/admin/scholarships/{scholarship.scholarship_id}/publish",
+        json={
+            **CYCLE,
+            "deadline_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
+            "deadline_precision": "datetime",
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+
+    detail = (await client.get(f"/api/v1/scholarships/{scholarship.scholarship_id}")).json()
+    assert detail["status"] == "closing_soon"
+    assert detail["status_detail"] == "closing_soon"
+
+    result = (await client.post("/api/v1/search", json=SEARCH)).json()["data"][0]
+    assert result["status"] == detail["status"]
 
 
 async def test_a_malformed_deadline_at_nulls_both_deadline_fields(db, client) -> None:

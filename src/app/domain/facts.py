@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from app.domain.taxonomy import TAXONOMY
 
@@ -55,6 +55,7 @@ class DerivedFacts:
     destinations: list[str]
     eligibility_note: str | None
     field_names: list[str]
+    programme_names: list[str]
     origin_mode: Literal["restricted", "unrestricted", "unknown"]
     origins: list[str]
     field_mode: Literal["restricted", "all", "unknown"]
@@ -89,6 +90,8 @@ class DerivedFacts:
             result["expected_reopen_month"] = self.expected_reopen_month
         if self.field_names:
             result["field_names"] = self.field_names
+        if self.programme_names:
+            result["programme_names"] = self.programme_names
         if self.funding_type is not None:
             result["funding_type"] = self.funding_type
         if self.deadline_at is not None:
@@ -115,7 +118,7 @@ def derive_facts(facts: dict) -> DerivedFacts:
     list or dict), so an isinstance check has to come first; and, subtler,
     computing status/status_detail from the *raw* value while only
     sanitizing what's shown to the caller produces an internally
-    contradictory response (status_detail: "opening_soon" next to a nulled
+    contradictory response (status_detail: "likely_to_open" next to a nulled
     expected_reopen_month). Deriving everything once, upfront, and feeding
     the same sanitized values to both the status computation and the public
     fields closes all three at once.
@@ -123,7 +126,9 @@ def derive_facts(facts: dict) -> DerivedFacts:
     deadline_at = safe_deadline_at(facts.get("deadline_at"))
     raw_precision = facts.get("deadline_precision", "datetime")
     deadline_precision: Literal["date", "datetime"] = (
-        raw_precision if raw_precision in ("date", "datetime") else "datetime"
+        cast(Literal["date", "datetime"], raw_precision)
+        if isinstance(raw_precision, str) and raw_precision in ("date", "datetime")
+        else "datetime"
     )
     raw_reopen_month = facts.get("expected_reopen_month")
     expected_reopen_month = (
@@ -164,29 +169,41 @@ def derive_facts(facts: dict) -> DerivedFacts:
     deadline_timezone = raw_deadline_timezone if isinstance(raw_deadline_timezone, str) else None
     raw_origin_mode = facts.get("origin_mode")
     origin_mode: Literal["restricted", "unrestricted", "unknown"] = (
-        raw_origin_mode
-        if raw_origin_mode in ("restricted", "unrestricted", "unknown")
+        cast(Literal["restricted", "unrestricted", "unknown"], raw_origin_mode)
+        if isinstance(raw_origin_mode, str)
+        and raw_origin_mode in ("restricted", "unrestricted", "unknown")
         else "unknown"
     )
     raw_field_mode = facts.get("field_mode")
     field_mode: Literal["restricted", "all", "unknown"] = (
-        raw_field_mode if raw_field_mode in ("restricted", "all", "unknown") else "unknown"
+        cast(Literal["restricted", "all", "unknown"], raw_field_mode)
+        if isinstance(raw_field_mode, str)
+        and raw_field_mode in ("restricted", "all", "unknown")
+        else "unknown"
     )
     raw_evidence_fresh = facts.get("evidence_fresh")
     evidence_fresh = raw_evidence_fresh if isinstance(raw_evidence_fresh, bool) else False
+    canonical_fields, _unmapped_fields = TAXONOMY.normalize_fields(
+        string_list(facts.get("fields", []))
+    )
+    canonical_degrees, _unmapped_degrees = TAXONOMY.normalize_degrees(
+        string_list(facts.get("levels", []))
+    )
+    programme_names = string_list(facts.get("programme_names", []))
     return DerivedFacts(
         deadline_at=deadline_at,
         deadline_precision=deadline_precision,
         deadline_timezone=deadline_timezone,
-        degree_levels=string_list(facts.get("levels", [])),
+        degree_levels=canonical_degrees,
         expected_reopen_month=expected_reopen_month,
         funding_type=funding_type,
         destinations=destinations,
         eligibility_note=eligibility_note,
-        field_names=string_list(facts.get("field_names", [])),
+        field_names=sorted({TAXONOMY.fields[value] for value in canonical_fields}),
+        programme_names=programme_names,
         origin_mode=origin_mode,
         origins=string_list(facts.get("origins", [])),
         field_mode=field_mode,
-        fields=string_list(facts.get("fields", [])),
+        fields=canonical_fields,
         evidence_fresh=evidence_fresh,
     )

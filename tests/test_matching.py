@@ -1,10 +1,15 @@
+import pytest
+
 from app.domain.matching import SearchProfile, evaluate_match
 
 
 def profile() -> SearchProfile:
-    #: A search for the broad "health_and_welfare" field, already expanded to
-    #: its narrow children by `taxonomy.normalize_search_filters`.
-    return SearchProfile("NG", frozenset({"CA", "GB"}), "masters", frozenset({"health", "welfare"}))
+    return SearchProfile(
+        "NG",
+        frozenset({"CA", "GB"}),
+        frozenset({"masters"}),
+        frozenset({"health_and_medical_sciences"}),
+    )
 
 
 def test_confirmed_match() -> None:
@@ -16,7 +21,7 @@ def test_confirmed_match() -> None:
             "origin_mode": "restricted",
             "origins": ["NG"],
             "field_mode": "restricted",
-            "fields": ["health"],
+            "fields": ["health_and_medical_sciences"],
             "evidence_fresh": True,
         },
     )
@@ -33,12 +38,23 @@ def test_unknown_eligibility_is_possible_not_confirmed() -> None:
             "levels": ["masters"],
             "origin_mode": "unknown",
             "field_mode": "restricted",
-            "fields": ["health"],
+            "fields": ["health_and_medical_sciences"],
         },
     )
     assert decision is not None
     assert decision.fit == "possible"
     assert decision.caveats
+
+
+def test_multiple_requested_degrees_match_any_accepted_degree() -> None:
+    multi = SearchProfile("NG", frozenset({"CA"}), frozenset({"masters", "mba"}), None)
+    assert (
+        evaluate_match(
+            multi,
+            {"destinations": ["CA"], "levels": ["mba"], "origin_mode": "unrestricted"},
+        )
+        is not None
+    )
 
 
 def test_destination_is_a_hard_gate() -> None:
@@ -57,9 +73,7 @@ def test_destination_is_a_hard_gate() -> None:
 
 
 def test_no_field_preference_never_excludes_a_field_restricted_record() -> None:
-    """A searcher with no field preference must still see every
-    destination/level/origin-eligible record, not just field_mode="all" ones."""
-    no_field_profile = SearchProfile("NG", frozenset({"CA"}), "masters", None)
+    no_field_profile = SearchProfile("NG", frozenset({"CA"}), frozenset({"masters"}), None)
     decision = evaluate_match(
         no_field_profile,
         {
@@ -67,7 +81,7 @@ def test_no_field_preference_never_excludes_a_field_restricted_record() -> None:
             "levels": ["masters"],
             "origin_mode": "unrestricted",
             "field_mode": "restricted",
-            "fields": ["ict"],
+            "fields": ["technology"],
         },
     )
     assert decision is not None
@@ -75,11 +89,6 @@ def test_no_field_preference_never_excludes_a_field_restricted_record() -> None:
 
 
 def test_explicit_null_facts_values_degrade_to_no_match_not_a_crash() -> None:
-    """`facts.get(key, [])` only substitutes the default when the key is
-    absent, not when it's present but explicitly null - a bare `for v in
-    None` used to raise TypeError here, in the per-row hard-gate loop
-    every /search request runs, crashing the whole response over one
-    corrupted row rather than just excluding it."""
     assert (
         evaluate_match(
             profile(),
@@ -96,18 +105,56 @@ def test_explicit_null_facts_values_degrade_to_no_match_not_a_crash() -> None:
     )
 
 
-def test_a_narrow_tag_outside_the_searched_broad_bucket_is_excluded() -> None:
-    """Searching the broad "ict" field must not match a scholarship tagged
-    with a narrow field from an unrelated broad bucket."""
-    ict_profile = SearchProfile("NG", frozenset({"CA"}), "masters", frozenset({"ict"}))
-    decision = evaluate_match(
-        ict_profile,
-        {
-            "destinations": ["CA"],
-            "levels": ["masters"],
-            "origin_mode": "unrestricted",
-            "field_mode": "restricted",
-            "fields": ["law"],
-        },
+def test_field_outside_the_searched_bucket_is_excluded() -> None:
+    ict_profile = SearchProfile(
+        "NG", frozenset({"CA"}), frozenset({"masters"}), frozenset({"technology"})
     )
-    assert decision is None
+    assert (
+        evaluate_match(
+            ict_profile,
+            {
+                "destinations": ["CA"],
+                "levels": ["masters"],
+                "origin_mode": "unrestricted",
+                "field_mode": "restricted",
+                "fields": ["law"],
+            },
+        )
+        is None
+    )
+
+
+def test_legacy_field_values_are_normalized_during_transition() -> None:
+    assert (
+        evaluate_match(
+            profile(),
+            {
+                "destinations": ["CA"],
+                "levels": ["masters"],
+                "origin_mode": "unrestricted",
+                "field_mode": "restricted",
+                "fields": ["health"],
+            },
+        )
+        is not None
+    )
+
+
+def test_an_unmappable_field_value_is_observable_not_silently_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An orphaned/unmapped field code in facts["fields"] must be logged,
+    not just silently excluded from the matched set."""
+    with caplog.at_level("WARNING", logger="app.domain.taxonomy"):
+        decision = evaluate_match(
+            profile(),
+            {
+                "destinations": ["CA"],
+                "levels": ["masters"],
+                "origin_mode": "unrestricted",
+                "field_mode": "restricted",
+                "fields": ["personal_services", "health"],
+            },
+        )
+    assert decision is not None
+    assert any(record.message == "taxonomy_unmapped_values" for record in caplog.records)

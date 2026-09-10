@@ -23,8 +23,8 @@ pytestmark = requires_db
 
 SEARCH = {
     "origin_country": "NG",
-    "program_level": "masters",
-    "field": "health_and_welfare",
+    "program_levels": ["masters"],
+    "field": "health_and_medical_sciences",
     "target_countries": ["CA", "GB"],
 }
 
@@ -74,7 +74,7 @@ async def test_search_returns_published_records(db, client) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert [item["name"] for item in body["data"]] == ["Award a"]
-    assert body["meta"]["confirmed_counts"] == {"open_verified": 1}
+    assert body["meta"]["confirmed_counts"] == {"open": 1}
 
 
 async def test_expired_deadline_is_never_returned_as_open(db, client) -> None:
@@ -87,9 +87,8 @@ async def test_expired_deadline_is_never_returned_as_open(db, client) -> None:
         deadline=datetime.now(UTC) - timedelta(days=1),
     )
     body = (await client.post("/api/v1/search", json=SEARCH)).json()
-    assert body["data"][0]["status"] == "status_unknown"
-    assert body["meta"]["confirmed_counts"].get("open_verified") is None
-    assert any("re-verification" in caveat for caveat in body["data"][0]["caveats"])
+    assert body["data"] == []
+    assert body["meta"]["confirmed_counts"] == {}
 
 
 async def test_confirmed_matches_rank_above_possible_ones(db, client) -> None:
@@ -98,6 +97,26 @@ async def test_confirmed_matches_rank_above_possible_ones(db, client) -> None:
     body = (await client.post("/api/v1/search", json=SEARCH)).json()
     assert [item["fit"] for item in body["data"]] == ["confirmed", "possible"]
     assert body["meta"]["possible_match_count"] == 1
+
+
+async def test_confirmed_still_ranks_above_possible_across_status_buckets(db, client) -> None:
+    """A closing_soon confirmed match is still a live, matched award - it
+    must outrank an open-but-uncertain possible match, even though "open"
+    sorts before "closing_soon" within the same fit tier."""
+    await _publish(
+        db, slug="possible-open", facts=POSSIBLE_FACTS, status=PublicStatus.open_verified
+    )
+    await _publish(
+        db,
+        slug="confirmed-closing-soon",
+        facts=CONFIRMED_FACTS,
+        status=PublicStatus.open_verified,
+        deadline=datetime.now(UTC) + timedelta(days=7),
+    )
+    body = (await client.post("/api/v1/search", json=SEARCH)).json()
+    assert [item["fit"] for item in body["data"]] == ["confirmed", "possible"]
+    assert body["data"][0]["status_detail"] == "closing_soon"
+    assert body["data"][1]["status_detail"] == "open"
 
 
 async def test_search_persists_the_session_and_search(db, client) -> None:

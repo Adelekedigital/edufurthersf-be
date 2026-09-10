@@ -1,6 +1,6 @@
 """Vocabularies the Finder shares with Core.
 
-Degree levels are a closed four-row vocabulary that Core states users cannot
+Degree levels are a closed vocabulary that Core states users cannot
 add to, and the Finder deliberately offers only two of them. Mirroring it at
 runtime would import levels the product must not offer and put a network call
 in front of four constants, so the codes are held locally and the agreement is
@@ -19,8 +19,9 @@ from app.domain.taxonomy import TAXONOMY
 #:     diploma    Certificate / Diploma   ISCED 4-5
 #:     bachelors  Bachelor's Degree       ISCED 6
 #:     masters    Master's Degree         ISCED 7
+#:     mba        Master of Business Admin ISCED 7
 #:     doctorate  Doctorate (PhD)         ISCED 8
-CORE_DEGREE_SLUGS = frozenset({"diploma", "bachelors", "masters", "doctorate"})
+CORE_DEGREE_SLUGS = frozenset({"diploma", "bachelors", "masters", "mba", "doctorate"})
 
 #: Core renamed `phd` to `doctorate` in that migration. The Finder accepts the
 #: old spelling as an input alias so a client may send either, but it must
@@ -36,7 +37,7 @@ def test_finder_degree_codes_are_core_slugs() -> None:
 
 def test_finder_offers_only_graduate_levels() -> None:
     """The product is for Master's and PhD applicants, so it is a strict subset."""
-    assert set(TAXONOMY.degrees) == {"masters", "doctorate"}
+    assert set(TAXONOMY.degrees) == {"masters", "mba", "doctorate"}
 
 
 def test_no_retired_core_slug_is_canonical() -> None:

@@ -30,9 +30,9 @@ async def test_the_returned_page_is_stored(db, client) -> None:
     }
     assert stored.returned_count == 1
     assert stored.expires_at is not None
-    assert stored.taxonomy_version == "taxonomy-v2"
+    assert stored.taxonomy_version == "taxonomy-v3"
     assert stored.match_policy_version == "match-v2"
-    assert stored.snapshot_schema_version == "snapshot-v2"
+    assert stored.snapshot_schema_version == "snapshot-v3"
     # ALLOWED_RESULT_KEYS now covers what SearchResult actually carries - a
     # field silently dropped from history is the exact class of gap this
     # allowlist exists to make visible rather than let happen quietly.
@@ -41,7 +41,7 @@ async def test_the_returned_page_is_stored(db, client) -> None:
     # The live response must report the same versions as the stored row -
     # SearchMeta has no default to silently fall back on if the route ever
     # forgets to pass these explicitly.
-    assert body["meta"]["taxonomy_version"] == "taxonomy-v2"
+    assert body["meta"]["taxonomy_version"] == "taxonomy-v3"
     assert body["meta"]["match_policy_version"] == "match-v2"
 
 

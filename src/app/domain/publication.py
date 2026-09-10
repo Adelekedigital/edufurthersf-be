@@ -31,6 +31,7 @@ def build_cycle_facts(
     eligibility_note: str | None = None,
     expected_reopen_month: int | None = None,
     field_names: list[str] | None = None,
+    programme_names: list[str] | None = None,
     funding_type: str | None = None,
     countries: CountryVocabulary,
 ) -> dict[str, Any]:
@@ -50,10 +51,9 @@ def build_cycle_facts(
     those can honestly capture the restriction; it is what is left when they
     cannot, so the restriction is still visible rather than silently dropped.
 
-    `field_names` is the same kind of escape hatch for `fields`: the source's
-    own course/subject wording ("MSc Development Economics"), kept verbatim
-    rather than only the ISCED-F bucket it was classified into - never
-    validated against the taxonomy, since it is a quote, not a code.
+    `field_names` is accepted as a legacy input name for source/programme
+    wording. It is preserved separately in `programme_names`; canonical field
+    labels are generated from `fields`.
 
     `funding_type` is how much of the cost is covered - distinct from
     `award_types` (what kind of instrument this is). Optional, same honesty
@@ -95,9 +95,14 @@ def build_cycle_facts(
         facts["eligibility_note"] = eligibility_note
     if expected_reopen_month is not None:
         facts["expected_reopen_month"] = expected_reopen_month
-    normalized_field_names = sorted({name.strip() for name in (field_names or []) if name.strip()})
-    if normalized_field_names:
-        facts["field_names"] = normalized_field_names
+    if normalized_fields:
+        facts["field_names"] = [TAXONOMY.fields[value] for value in normalized_fields]
+    programme_name_source = programme_names if programme_names is not None else field_names or []
+    normalized_programme_names = sorted(
+        {name.strip() for name in programme_name_source if name.strip()}
+    )
+    if normalized_programme_names:
+        facts["programme_names"] = normalized_programme_names
     if funding_type:
         facts["funding_type"] = TAXONOMY.funding_type(funding_type)
     if deadline_at is not None:

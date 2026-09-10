@@ -20,7 +20,7 @@ BASE_FACTS = {
     "levels": ["masters"],
     "origin_mode": "unrestricted",
     "field_mode": "restricted",
-    "fields": ["health"],
+    "fields": ["health_and_medical_sciences"],
     "evidence_fresh": True,
 }
 
@@ -42,7 +42,7 @@ def test_out_of_contract_facts_degrade_individually_not_all_at_once() -> None:
             "levels": ["masters", 123, None],
             "funding_type": "free_money",
             "eligibility_note": 12345,
-            "field_names": ["MSc Development Economics", 42, None],
+            "programme_names": ["MSc Development Economics", 42, None],
         }
     )
     assert derived.deadline_at is not None
@@ -53,7 +53,8 @@ def test_out_of_contract_facts_degrade_individually_not_all_at_once() -> None:
     assert derived.degree_levels == ["masters"]
     assert derived.funding_type is None
     assert derived.eligibility_note is None
-    assert derived.field_names == ["MSc Development Economics"]
+    assert derived.field_names == ["Health and Medical Sciences"]
+    assert derived.programme_names == ["MSc Development Economics"]
 
 
 def test_an_unhashable_funding_type_does_not_crash_the_membership_check() -> None:
@@ -64,15 +65,30 @@ def test_an_unhashable_funding_type_does_not_crash_the_membership_check() -> Non
     assert derived.funding_type is None
 
 
-def test_a_non_list_levels_or_field_names_does_not_crash() -> None:
+def test_a_non_list_levels_or_programme_names_does_not_crash() -> None:
     """A bare `for x in value` over a non-list raises TypeError - `levels`/
-    `field_names` must degrade to empty, not crash, when facts holds
+    `programme_names` must degrade to empty, not crash, when facts holds
     something other than a list at all (not just a list with bad items)."""
     derived = _derive_facts(
-        {**BASE_FACTS, "levels": "masters", "field_names": "MSc Development Economics"}
+        {**BASE_FACTS, "levels": "masters", "programme_names": "MSc Development Economics"}
     )
     assert derived.degree_levels == []
-    assert derived.field_names == []
+    assert derived.programme_names == []
+    assert derived.field_names == ["Health and Medical Sciences"]
+
+
+def test_unhashable_enum_values_do_not_crash_fact_derivation() -> None:
+    derived = _derive_facts(
+        {
+            **BASE_FACTS,
+            "deadline_precision": [],
+            "origin_mode": {},
+            "field_mode": [],
+        }
+    )
+    assert derived.deadline_precision == "datetime"
+    assert derived.origin_mode == "unknown"
+    assert derived.field_mode == "unknown"
 
 
 def test_a_boolean_reopen_month_is_not_treated_as_month_one() -> None:
@@ -143,3 +159,27 @@ def test_a_non_string_deadline_timezone_does_not_crash_status_evaluation() -> No
         }
     )
     assert derived.deadline_timezone is None
+
+
+def test_programme_names_does_not_leak_canonical_field_labels() -> None:
+    """A cycle that sets `fields` but never explicitly sets `programme_names`
+    must not have the auto-generated canonical `field_names` label leak into
+    `programme_names` as though it were free-text programme wording -
+    build_cycle_facts always writes a canonical `field_names` key whenever
+    `fields` is given."""
+    derived = _derive_facts({**BASE_FACTS, "field_names": ["Health and Medical Sciences"]})
+    assert derived.programme_names == []
+
+
+def test_duplicate_field_aliases_do_not_produce_duplicate_canonical_fields() -> None:
+    """`fields=["ict", "cs"]` both alias to "technology" - `fields` must
+    dedupe the same way `field_names` already does, or a frontend zipping
+    the two arrays by index misrenders."""
+    derived = _derive_facts({**BASE_FACTS, "fields": ["ict", "cs"]})
+    assert derived.fields == ["technology"]
+    assert derived.field_names == ["Technology"]
+
+
+def test_duplicate_degree_aliases_do_not_produce_duplicate_degree_levels() -> None:
+    derived = _derive_facts({**BASE_FACTS, "levels": ["phd", "doctorate"]})
+    assert derived.degree_levels == ["doctorate"]

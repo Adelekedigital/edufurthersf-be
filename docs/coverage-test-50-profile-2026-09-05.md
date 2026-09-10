@@ -1,5 +1,8 @@
 # 50-profile coverage test (field taxonomy), 2026-09-05
 
+> Historical report: this run used `taxonomy-v2` and former ISCED-F codes.
+> Retained for audit history; it is not a current taxonomy fixture.
+
 Follow-up to the [20-profile test](coverage-test-2026-09-05.md), run specifically
 to answer: does the new ISCED-F field taxonomy actually help or hurt search,
 against the real published dataset - not a hypothetical one.

@@ -18,17 +18,13 @@ Base URL (staging): `https://edufurthersf-be-dev.up.railway.app/api/v1`
    on 429s - see "Errors" below.
 3. **`status_detail` is new** on every search result and the detail
    response - a presentation-only refinement of `status`
-   (open/closing_soon/opening_soon/likely_to_reopen/status_unknown).
-4. **The field taxonomy was rebuilt** from 2 flat codes to ISCED-F 2013 (11
-   broad codes for search, 29 narrow codes used only for tagging) - see
-   "Fields" below. Practically: expect `field` to now be a real dropdown of
-   11 options, not a binary choice.
-5. **`field_names` is new** on every search result and the detail response -
-   the source's own course/subject wording ("MSc Development Economics"),
-   verbatim, alongside the normalised broad/narrow codes. Use it to show the
-   *specific* programme name; the `field` codes are for filtering, not for
-   display copy. Empty for most records today (only just started being
-   populated at publish time).
+    (open/closing_soon/likely_to_open/status_unknown).
+4. **The field taxonomy is product-owned** with 14 canonical codes returned by
+   `/taxonomies` - see "Fields" below.
+5. **`fields`, `field_names`, and `programme_names`** are returned on every
+   search result and detail response. `fields` are canonical codes,
+   `field_names` are their canonical labels, and `programme_names` preserves
+   source-specific wording such as "MSc Development Economics".
 6. **`POST /scholarships/{identifier}` is new** (`GET` still exists,
    unchanged) - same detail response, plus an AI-generated
    `match_explanation` when you send the searcher's profile. See below.
@@ -65,29 +61,33 @@ The vocabularies a search form is built from:
 
 ```jsonc
 {
-  "version": "taxonomy-v2",
+  "version": "taxonomy-v3",
   "countries": [{ "code": "NG", "label": "Nigeria" }, ...],   // any origin
   "destinations": [{ "code": "CA", "label": "Canada" }, ...], // verified-coverage subset of countries
-  "degrees": [{ "code": "masters", "label": "Master's" }, { "code": "doctorate", "label": "PhD" }],
-  "fields": [{ "code": "ict", "label": "Information and Communication Technologies (ICT)" }, ...], // 11 broad codes - use this for the search filter
-  "narrow_fields": [{ "code": "health", "label": "Health" }, ...], // 29 codes, not a search filter - reference only
+  "degrees": [{ "code": "masters", "label": "Master's" }, { "code": "mba", "label": "MBA" }, { "code": "doctorate", "label": "PhD" }],
+  "fields": [{ "code": "technology", "label": "Technology" }, ...], // canonical product fields
   "award_types": [{ "code": "scholarship", "label": "Scholarship" }, ...], // what kind of instrument
   "funding_types": [{ "code": "fully_funded", "label": "Fully funded" }, ...] // how much of the cost is covered - see "Funding type" below
 }
 ```
 
-Fetch this once and cache it; it changes rarely. Use `fields` (broad) to
-populate the field dropdown - `narrow_fields` exists for completeness/future
-use (e.g. showing a scholarship's specific tagged programme on its detail
-page) but isn't itself a valid `field` search value.
+Fetch this once and cache it; it changes rarely. Use `fields` to populate the
+field dropdown. There is no separate `narrow_fields` collection.
+
+Current field codes are `technology`, `engineering`,
+`mathematics_and_statistics`, `natural_sciences`,
+`health_and_medical_sciences`, `business_and_management`,
+`economics_and_development`, `social_sciences`, `law`,
+`public_policy_and_governance`, `education`, `arts_humanities_and_design`,
+`agriculture_and_food_systems`, and `environmental_and_climate_sciences`.
 
 Optionally narrow the response with a repeated `types` query param -
-`GET /taxonomies?types=fields&types=narrow_fields` returns only those two
-collections; every other key comes back as `[]`, not omitted, so the shape
+`GET /taxonomies?types=fields` returns only that collection; every other key
+comes back as `[]`, not omitted, so the shape
 never changes. Omitting `types`, or sending it empty (`?types=`), both mean
 "no filter" and return the full vocabulary - same result either way. Valid
-values: `countries`, `destinations`, `degrees`, `fields`, `narrow_fields`,
-`award_types`, `funding_types`. An actual unrecognized value (e.g.
+values: `countries`, `destinations`, `degrees`, `fields`, `award_types`,
+`funding_types`. An actual unrecognized value (e.g.
 `?types=bogus`) is a `422`.
 
 If your HTTP client serializes arrays with a bracket suffix
@@ -101,9 +101,9 @@ back to the full vocabulary when populated.
 // request
 {
   "origin_country": "NG",       // any real country, 2-3 chars
-  "program_level": "masters",   // "masters" | "doctorate" (aliases like "phd" also accepted)
+  "program_levels": ["masters"], // one or more of "masters" | "mba" | "doctorate"
   "target_countries": ["CA", "GB"], // 1-10 countries; may include uncovered ones, see below
-  "field": "health_and_welfare", // optional - omit/null for no field preference. One of the 11 broad codes from GET /taxonomies `fields`
+  "field": "health_and_medical_sciences", // optional - omit/null for no field preference
   "limit": 20,                   // 1-50, default 20
   "cursor": "..."                // omit on a fresh search; pass back for the next page
 }
@@ -122,7 +122,9 @@ back to the full vocabulary when populated.
       "official_url": "https://...",
       "last_verified_at": "2026-08-01T00:00:00Z",
       "eligibility_note": "Not open to UK nationals.", // present only for a restriction the schema can't otherwise represent
-      "field_names": ["MSc Development Economics"], // source's own wording, for display - not a filter value
+      "fields": ["economics_and_development"],
+      "field_names": ["Economics and Development"],
+      "programme_names": ["MSc Development Economics"],
       "destinations": ["CA"], // this award's own destination code(s) - see "Destination display" below
       "deadline_at": "2026-12-31T00:00:00Z", // null when rolling/not yet set
       "deadline_precision": "date", // "date" | "datetime" | null (null iff deadline_at is null) - "date" means don't render a time of day
@@ -136,7 +138,7 @@ back to the full vocabulary when populated.
   "next_cursor": "...",  // null when there's no next page
   "meta": {
     "search_id": "...", "response_id": "...", "evaluated_at": "...",
-    "match_policy_version": "match-v2", "taxonomy_version": "taxonomy-v2",
+    "match_policy_version": "match-v2", "taxonomy_version": "taxonomy-v3",
     "confirmed_counts": { "...": 0 },
     "possible_match_count": 0,
     "warnings": ["no_verified_coverage:FR,DE"]
@@ -207,30 +209,28 @@ this just started being captured. Don't infer or guess it from
 
 ### Fields
 
-`field` is optional and, when given, is one of the 11 broad ISCED-F codes
-from `GET /taxonomies`' `fields` list (e.g. `ict`, `health_and_welfare`,
-`business_administration_law`). Omitting it means "no field preference" -
+`field` is optional and, when given, is one of the canonical product codes
+from `GET /taxonomies`' `fields` list (e.g. `technology`,
+`health_and_medical_sciences`). Omitting it means "no field preference" -
 this is a legitimate, common choice, not a degraded one; don't force a
-selection. Heads up on impact: as of this test pass, only 2 of 99 published
-scholarships are actually tagged with a specific field (`field_mode:
-"restricted"`) - the rest are open to any field or not yet classified, so
-picking a field narrows results by very little today. That will improve as
-more scholarships get tagged at publish time; it's not a frontend concern to
-solve.
+selection. Catalog coverage for the new fields must be measured again after
+the data backfill; the previous ISCED-F coverage report is historical.
 
 ### status vs status_detail
 
-`status` is the business state search/eligibility already reflects.
-`status_detail` is a display-only refinement for copy/badges:
+Normal search results expose only the user-facing `status` values
+`open`, `closing_soon`, and `likely_to_open`. Internal records may retain
+`open_verified`, `expected_to_reopen`, or `status_unknown`; status-unknown
+records are excluded from normal search results.
+`status_detail` mirrors the display refinement:
 
 - `open_verified` -> `"open"` normally, `"closing_soon"` inside 14 days of
   the deadline.
-- `expected_to_reopen` -> `"likely_to_reopen"` normally, `"opening_soon"`
-  when the expected reopen month is imminent (within 1 month).
-- anything else -> `"status_unknown"`.
+- `expected_to_reopen` -> `"likely_to_open"`.
+- anything else is not returned by normal search.
 
-Use `status_detail` for wording/badges only. Eligibility and any
-filtering/sorting logic must key off `status`, never `status_detail`.
+Use `status_detail` for wording/badges only. Eligibility and filtering key off
+the internal evaluated state before the public result is built.
 
 ### Pagination
 
@@ -252,14 +252,14 @@ Replays a search's stored page one - same `SearchResult`/`meta` shape as
   "meta": { /* same shape as POST /search's meta - confirmed_counts/possible_match_count nullable, see above */ },
   "filters": {
     "origin_country": "NG", "target_countries": ["CA", "GB"],
-    "program_level": "masters", "field": "health_and_welfare"
+    "program_levels": ["masters"], "field": "health_and_medical_sciences"
   }
 }
 ```
 
 Use `filters` to restore the searcher's profile for `POST
 /scholarships/{identifier}`'s personalized `match_explanation` (it has
-`origin_country`/`program_level`/`field` - `target_countries` is extra,
+`origin_country`/`program_levels`/`field` - `target_countries` is extra,
 ignore it there) without needing the original search form state around.
 
 Requires the same session cookie the original `POST /search` set - **not** a
@@ -285,7 +285,7 @@ what decides whether a personalised AI explanation gets generated.
   `match_explanation` is always `null`.
 - **`POST`** - body is the searcher's profile:
   ```jsonc
-  { "origin_country": "NG", "program_level": "masters", "field": "ict" }
+  { "origin_country": "NG", "program_levels": ["masters"], "field": "technology" }
   ```
   (`field` optional, same broad code as `/search`; no `target_countries` -
   the destination is already fixed by whichever scholarship this is.) If the

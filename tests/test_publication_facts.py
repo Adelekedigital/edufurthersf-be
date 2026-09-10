@@ -74,9 +74,25 @@ def test_no_expected_reopen_month_means_no_key_at_all() -> None:
     assert "expected_reopen_month" not in facts
 
 
-def test_field_names_are_stored_verbatim_deduped_and_sorted() -> None:
-    facts = _facts(field_names=["Mathematics", "mathematics", "Mathematics", "Statistics"])
-    assert facts["field_names"] == ["Mathematics", "Statistics", "mathematics"]
+def test_field_labels_and_programme_names_are_separated() -> None:
+    facts = _facts(
+        fields=["mathematics_and_statistics"],
+        field_names=["Mathematics", "mathematics", "Mathematics", "Statistics"],
+    )
+    assert facts["field_names"] == ["Mathematics and Statistics"]
+    assert facts["programme_names"] == ["Mathematics", "Statistics", "mathematics"]
+
+
+def test_an_explicitly_empty_programme_names_list_is_respected() -> None:
+    """An explicit programme_names=[] is the caller's honest "no programme
+    names" - it must not be silently replaced by field_names the way an
+    omitted (None) programme_names correctly is."""
+    facts = _facts(
+        fields=["mathematics_and_statistics"],
+        field_names=["Mathematics", "Statistics"],
+        programme_names=[],
+    )
+    assert "programme_names" not in facts
 
 
 def test_no_field_names_means_no_key_at_all() -> None:

@@ -79,13 +79,13 @@ async def get_match_explanation(
     cycle: ScholarshipCycle,
     facts: dict[str, Any],
     origin_country: str,
-    program_level: str,
+    program_levels: list[str],
     field: str | None,
     decision: MatchDecision,
 ) -> str | None:
     profile_payload = {
         "origin_country": origin_country,
-        "program_level": program_level,
+        "program_levels": program_levels,
         "field": field,
     }
     profile_digest = filter_digest(profile_payload)

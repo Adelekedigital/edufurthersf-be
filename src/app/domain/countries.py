@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 #: Destinations the index covers. Owned here rather than mirrored from Core:
 #: it records verified coverage, not a fact about the country.
-SUPPORTED_DESTINATIONS = frozenset({"CA", "GB", "US", "DE", "FI"})
+SUPPORTED_DESTINATIONS = frozenset({"CA", "GB", "US", "DE", "FI", "AU"})
 
 #: Stands in until the mirror is populated, so a fresh environment can still
 #: answer searches. Not the authoritative list — Core's catalogue is.
@@ -24,6 +24,7 @@ SEED_COUNTRIES: dict[str, str] = {
     "US": "United States",
     "DE": "Germany",
     "FI": "Finland",
+    "AU": "Australia",
 }
 
 
