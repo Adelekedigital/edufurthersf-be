@@ -239,8 +239,8 @@ local runs that QStash reaches directly may leave it unset.
 ### Parse.bot harvest (ScholarshipPortal, PhDScanner)
 
 `harvest_parsebot` is a recurring job that pulls candidates from two
-Parse.bot-wrapped marketplace APIs — ScholarshipPortal (all five supported
-destinations, both degree levels) and PhDScanner (funded PhD opportunities;
+Parse.bot-wrapped marketplace APIs — ScholarshipPortal (every supported
+destination, both degree levels) and PhDScanner (funded PhD opportunities;
 covers `GB`/`DE`/`FI` well, returns nothing for `CA`/`US`) — and feeds them
 through the exact same `import_feed_records` pipeline as the CSV feed import,
 so every result lands as an ordinary `Discovery` needing the same review

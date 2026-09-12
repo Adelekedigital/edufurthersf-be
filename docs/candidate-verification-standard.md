@@ -55,10 +55,12 @@ best-effort publish.
 4. **No taxonomy-forcing.** `field_mode=unknown` when the field doesn't
     cleanly map to a real product field code. The current canonical field
     vocabulary is the flat `taxonomy-v3` list in `domain/taxonomy.py`.
-    `destinations` includes Australia (`AU`) alongside the verified destinations
-    (`CA`, `GB`, `US`, `DE`, `FI`); an Erasmus Mundus-style
+    `destinations` is the current `SUPPORTED_DESTINATIONS` list in
+    `domain/countries.py` (verified coverage, not the same list as origin
+    countries - see that module for what's actually supported today, since
+    it changes independently of this document); an Erasmus Mundus-style
    multi-country consortium only counts if the applicant's actual study
-   country is *guaranteed* to be one of those five, not merely possible.
+   country is *guaranteed* to be one of those, not merely possible.
    **Field tagging is now a required publish-time step, not an afterthought**
    (the [50-profile test](coverage-test-50-profile-2026-09-05.md) found 97/99
    published records left at `field_mode="unknown"`, which is exactly the
@@ -118,8 +120,8 @@ Objective, independently-verifiable facts only - never a subjective
   university, doesn't fit the provider/scholarship schema; the generic
   British Council GREAT Scholarship post has the same problem - "over 60
   universities...runs its own selection process").
-- The destination is verifiably outside our five supported ones (`CA`,
-  `GB`, `US`, `DE`, `FI`) - see "Other countries" below. This is a fast,
+- The destination is verifiably outside `SUPPORTED_DESTINATIONS`
+  (`domain/countries.py`) - see "Other countries" below. This is a fast,
   objective closure knowable from the institution's own name/location, not
   an evidence-quality problem, and doesn't need the full fetch-and-cross-
   check pass the other reject reasons require.
