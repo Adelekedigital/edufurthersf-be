@@ -18,10 +18,18 @@ from app.domain.extraction import extract_candidate_facts
 from app.domain.models import Discovery, ReviewTask, Source
 from app.domain.normalization import normalize_discovery
 from app.domain.parsebot_harvest import (
+    CAREERONESTOP_SOURCE_NAME,
+    FASTWEB_SOURCE_NAME,
+    MASTERSPORTAL_SOURCE_NAME,
+    OPPORTUNITYDESK_SOURCE_NAME,
     PHDSCANNER_SOURCE_NAME,
     SCHOLARSHIPPORTAL_SOURCE_NAME,
     HarvestedRecord,
+    careeronestop_to_record,
+    fastweb_to_record,
+    mastersportal_to_record,
     opportunity_to_record,
+    opportunitydesk_to_record,
     scholarship_to_record,
 )
 from app.domain.review_draft import draft_review_recommendation
@@ -40,7 +48,16 @@ from app.infra.jobs import (
 )
 from app.infra.linking import link_discovery
 from app.infra.outbox import dispatch_analytics_events
-from app.infra.parsebot_client import fetch_phdscanner, fetch_scholarshipportal
+from app.infra.parsebot_client import (
+    Major,
+    fetch_careeronestop,
+    fetch_fastweb_by_major,
+    fetch_fastweb_featured,
+    fetch_mastersportal,
+    fetch_opportunitydesk,
+    fetch_phdscanner,
+    fetch_scholarshipportal,
+)
 from app.infra.research_budget import reserve_call
 from app.infra.source_persistence import fetch_and_persist_page
 from app.infra.tavily_client import search_tavily
@@ -275,10 +292,24 @@ def _map_and_append(
         return False
 
 
-async def _harvest_parsebot(db: AsyncSession) -> None:
-    """Pull new candidates from ScholarshipPortal and PhDScanner (Parse.bot).
+def _bind_fastweb_major(major: Major) -> Callable[[], list[dict]]:
+    """A plain closure, not a lambda with a default-arg workaround: each of
+    the 5 Major enum values needs its own zero-arg callable for
+    asyncio.to_thread, and a loop-captured lambda without this indirection
+    would silently bind every one of them to the loop's final value."""
 
-    The kill switch is `Source.active`, not an env flag: deactivating either
+    def _call() -> list[dict]:
+        return fetch_fastweb_by_major(major)
+
+    return _call
+
+
+async def _harvest_parsebot(db: AsyncSession) -> None:
+    """Pull new candidates from every synced Parse.bot marketplace API:
+    ScholarshipPortal, PhDScanner, Mastersportal, Opportunity Desk, Fastweb,
+    CareerOneStop (.org).
+
+    The kill switch is `Source.active`, not an env flag: deactivating any one
     Source via the existing `POST /internal/admin/sources/{id}/deactivate`
     stops that API's harvest immediately, no redeploy needed, and
     `import_feed_records` already quarantines anything against an inactive
@@ -307,7 +338,26 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
     phdscanner = await db.scalar(
         select(Source).where(Source.name == PHDSCANNER_SOURCE_NAME, Source.active.is_(True))
     )
-    if scholarshipportal is None and phdscanner is None:
+    mastersportal = await db.scalar(
+        select(Source).where(Source.name == MASTERSPORTAL_SOURCE_NAME, Source.active.is_(True))
+    )
+    opportunitydesk = await db.scalar(
+        select(Source).where(Source.name == OPPORTUNITYDESK_SOURCE_NAME, Source.active.is_(True))
+    )
+    fastweb = await db.scalar(
+        select(Source).where(Source.name == FASTWEB_SOURCE_NAME, Source.active.is_(True))
+    )
+    careeronestop = await db.scalar(
+        select(Source).where(Source.name == CAREERONESTOP_SOURCE_NAME, Source.active.is_(True))
+    )
+    if (
+        scholarshipportal is None
+        and phdscanner is None
+        and mastersportal is None
+        and opportunitydesk is None
+        and fastweb is None
+        and careeronestop is None
+    ):
         logger.info("parsebot_harvest_skipped", extra={"reason": "no_active_source"})
         return
 
@@ -316,6 +366,10 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
     skipped = 0
     sp_attempts = sp_failures = 0
     phd_attempts = phd_failures = 0
+    mp_attempts = mp_failures = 0
+    od_attempts = od_failures = 0
+    fw_attempts = fw_failures = 0
+    cos_attempts = cos_failures = 0
 
     study_levels: tuple[Literal["master", "phd"], ...] = ("master", "phd")
     if scholarshipportal is not None:
@@ -372,6 +426,100 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
                 skipped += not appended
         _update_harvest_health(
             phdscanner, attempts=phd_attempts, failures=phd_failures, now=harvested_at
+        )
+
+    if mastersportal is not None:
+        for destination in sorted(SUPPORTED_DESTINATIONS):
+            mp_attempts += 1
+            try:
+                raw_items = await asyncio.to_thread(fetch_mastersportal, destination)
+            except Exception:
+                mp_failures += 1
+                logger.warning(
+                    "parsebot_fetch_failed",
+                    extra={"api": "mastersportal", "destination": destination},
+                )
+                continue
+            for raw in raw_items:
+                appended = _map_and_append(
+                    records,
+                    source_id=mastersportal.source_id,
+                    raw=raw,
+                    to_record=mastersportal_to_record,
+                    harvested_at=harvested_at,
+                )
+                skipped += not appended
+        _update_harvest_health(
+            mastersportal, attempts=mp_attempts, failures=mp_failures, now=harvested_at
+        )
+
+    if opportunitydesk is not None:
+        od_attempts += 1
+        try:
+            raw_items = await asyncio.to_thread(fetch_opportunitydesk)
+        except Exception:
+            od_failures += 1
+            logger.warning("parsebot_fetch_failed", extra={"api": "opportunitydesk"})
+        else:
+            for raw in raw_items:
+                appended = _map_and_append(
+                    records,
+                    source_id=opportunitydesk.source_id,
+                    raw=raw,
+                    to_record=opportunitydesk_to_record,
+                    harvested_at=harvested_at,
+                )
+                skipped += not appended
+        _update_harvest_health(
+            opportunitydesk, attempts=od_attempts, failures=od_failures, now=harvested_at
+        )
+
+    if fastweb is not None:
+        fastweb_calls: list[tuple[str, Callable[[], list[dict]]]] = [
+            ("featured", fetch_fastweb_featured)
+        ]
+        for major in Major:
+            fastweb_calls.append((major.value, _bind_fastweb_major(major)))
+        for label, call in fastweb_calls:
+            fw_attempts += 1
+            try:
+                raw_items = await asyncio.to_thread(call)
+            except Exception:
+                fw_failures += 1
+                logger.warning("parsebot_fetch_failed", extra={"api": "fastweb", "query": label})
+                continue
+            for raw in raw_items:
+                appended = _map_and_append(
+                    records,
+                    source_id=fastweb.source_id,
+                    raw=raw,
+                    to_record=fastweb_to_record,
+                    harvested_at=harvested_at,
+                )
+                skipped += not appended
+        _update_harvest_health(
+            fastweb, attempts=fw_attempts, failures=fw_failures, now=harvested_at
+        )
+
+    if careeronestop is not None:
+        cos_attempts += 1
+        try:
+            raw_items = await asyncio.to_thread(fetch_careeronestop)
+        except Exception:
+            cos_failures += 1
+            logger.warning("parsebot_fetch_failed", extra={"api": "careeronestop"})
+        else:
+            for raw in raw_items:
+                appended = _map_and_append(
+                    records,
+                    source_id=careeronestop.source_id,
+                    raw=raw,
+                    to_record=careeronestop_to_record,
+                    harvested_at=harvested_at,
+                )
+                skipped += not appended
+        _update_harvest_health(
+            careeronestop, attempts=cos_attempts, failures=cos_failures, now=harvested_at
         )
 
     if not records:
