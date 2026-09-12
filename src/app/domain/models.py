@@ -163,6 +163,15 @@ class Source(TimestampMixin, Base):
     authority_grade: Mapped[str] = mapped_column(String(1))
     approved_domains: Mapped[list[str]] = mapped_column(JSONB, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Consecutive harvest runs where every call for this Source failed -
+    #: reset to 0 on any successful call. A crawled-data-as-API source
+    #: (Parse.bot) can silently break when the underlying site changes;
+    #: this is the record of that, not just a per-call log line. See
+    #: infra/worker.py's _update_harvest_health.
+    consecutive_harvest_failures: Mapped[int] = mapped_column(Integer, default=0)
+    last_harvest_failure_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class SourcePage(TimestampMixin, Base):

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -30,6 +31,10 @@ class SourceRead(BaseModel):
     authority_grade: str
     approved_domains: list[str]
     active: bool
+    #: Consecutive fully-failed harvest runs (see worker.py's
+    #: _update_harvest_health) - worker-maintained, never client-settable.
+    consecutive_harvest_failures: int
+    last_harvest_failure_at: datetime | None
 
 
 class SourceListResponse(BaseModel):

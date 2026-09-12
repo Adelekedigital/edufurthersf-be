@@ -314,16 +314,20 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
     harvested_at = datetime.now(UTC)
     records: list[FeedRecord] = []
     skipped = 0
+    sp_attempts = sp_failures = 0
+    phd_attempts = phd_failures = 0
 
     study_levels: tuple[Literal["master", "phd"], ...] = ("master", "phd")
     if scholarshipportal is not None:
         for destination in sorted(SUPPORTED_DESTINATIONS):
             for study_level in study_levels:
+                sp_attempts += 1
                 try:
                     raw_items = await asyncio.to_thread(
                         fetch_scholarshipportal, destination, study_level
                     )
                 except Exception:
+                    sp_failures += 1
                     logger.warning(
                         "parsebot_fetch_failed",
                         extra={
@@ -342,12 +346,17 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
                         harvested_at=harvested_at,
                     )
                     skipped += not appended
+        _update_harvest_health(
+            scholarshipportal, attempts=sp_attempts, failures=sp_failures, now=harvested_at
+        )
 
     if phdscanner is not None:
         for destination in sorted(SUPPORTED_DESTINATIONS):
+            phd_attempts += 1
             try:
                 raw_items = await asyncio.to_thread(fetch_phdscanner, destination)
             except Exception:
+                phd_failures += 1
                 logger.warning(
                     "parsebot_fetch_failed", extra={"api": "phdscanner", "destination": destination}
                 )
@@ -361,8 +370,12 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
                     harvested_at=harvested_at,
                 )
                 skipped += not appended
+        _update_harvest_health(
+            phdscanner, attempts=phd_attempts, failures=phd_failures, now=harvested_at
+        )
 
     if not records:
+        await db.commit()  # persist the harvest-health update even with nothing to import
         logger.info("parsebot_harvest_empty", extra={"skipped": skipped})
         return
 
@@ -377,6 +390,38 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
             "rejected": outcome.rejected,
         },
     )
+
+
+#: Consecutive fully-failed harvest runs before a source is treated as
+#: worth a human look, not just a log line - roughly 3 weekly runs, per
+#: RECURRING_WEEKLY_KINDS's cadence.
+REPEATED_HARVEST_FAILURE_THRESHOLD = 3
+
+
+def _update_harvest_health(source: Source, *, attempts: int, failures: int, now: datetime) -> None:
+    """Record whether every call this run failed for `source` (its
+    underlying Parse.bot scraper-as-API may have broken - the target site
+    changed, the marketplace listing broke, credentials expired) versus at
+    least one succeeding. Attempts == 0 (nothing to fetch this run - a
+    source loop can be empty) leaves the counter untouched rather than
+    treating "nothing tried" as either a success or a failure.
+    """
+    if attempts == 0:
+        return
+    if failures < attempts:
+        source.consecutive_harvest_failures = 0
+        return
+    source.consecutive_harvest_failures += 1
+    source.last_harvest_failure_at = now
+    if source.consecutive_harvest_failures >= REPEATED_HARVEST_FAILURE_THRESHOLD:
+        logger.warning(
+            "parsebot_source_repeatedly_failing",
+            extra={
+                "source_id": str(source.source_id),
+                "source_name": source.name,
+                "consecutive_harvest_failures": source.consecutive_harvest_failures,
+            },
+        )
 
 
 #: Two phrasings per destination cover the graduate/doctoral split without
