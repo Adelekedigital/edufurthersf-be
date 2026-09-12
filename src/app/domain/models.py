@@ -201,6 +201,19 @@ class SourceSnapshot(Base):
     failure_classification: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
+class ResearchProviderUsage(TimestampMixin, Base):
+    """Per-provider, per-calendar-month call counts for external research
+    APIs (Tavily, Jina.ai) that have a real free-tier quota to respect.
+    Nothing tracked usage against any external quota before this - Parse.bot
+    just stays conservative by convention (RESULTS_PER_CALL). See
+    app/infra/research_budget.py for the enforcement."""
+
+    __tablename__ = "research_provider_usage"
+    provider: Mapped[str] = mapped_column(String(50), primary_key=True)
+    period_key: Mapped[str] = mapped_column(String(20), primary_key=True)
+    calls_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class Discovery(TimestampMixin, Base):
     __tablename__ = "discoveries"
     discovery_id: Mapped[uuid.UUID] = mapped_column(

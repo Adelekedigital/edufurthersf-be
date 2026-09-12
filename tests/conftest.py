@@ -76,7 +76,7 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
                 "review_tasks, discoveries, discovery_quarantine, crawl_runs, "
                 "source_snapshots, source_pages, sources, "
                 "outbox_events, consumer_receipts, audit_log, verifications, countries, "
-                "verification_evidence RESTART IDENTITY CASCADE"
+                "verification_evidence, research_provider_usage RESTART IDENTITY CASCADE"
             )
         )
 
