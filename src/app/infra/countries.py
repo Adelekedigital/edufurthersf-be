@@ -22,9 +22,15 @@ async def sync_countries(db: AsyncSession, client: CoreCatalogueClient) -> dict[
     partially fetched response must not silently empty the vocabulary that
     search validates against.
 
-    `is_supported_destination` is deliberately absent from the update set. It
-    is Finder's coverage decision, and a sync overwriting it would quietly
-    withdraw destinations the index still covers.
+    `is_supported_destination` is Finder's coverage decision, not Core's, so
+    a sync only ever turns it on, never off - an already-supported
+    destination must never be silently withdrawn just because a later
+    `SUPPORTED_DESTINATIONS` doesn't happen to list it that call. But a
+    row that already existed before its code was added to
+    `SUPPORTED_DESTINATIONS` (the common case - Core's catalogue lists a
+    country long before Finder decides to support it as a destination)
+    must still pick up that support on the next sync, not stay stuck at
+    whatever was true on first insert forever.
     """
     entries = await client.list_catalogue("countries")
     if not entries:
@@ -53,6 +59,9 @@ async def _upsert(db: AsyncSession, entry: CatalogueEntry, *, now: datetime) -> 
                 "display_name": statement.excluded.display_name,
                 "core_id": statement.excluded.core_id,
                 "synced_at": statement.excluded.synced_at,
+                "is_supported_destination": (
+                    Country.is_supported_destination | statement.excluded.is_supported_destination
+                ),
             },
         )
     )
