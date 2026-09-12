@@ -215,6 +215,7 @@ fetch backs it up:
   scholarships is possible but is provider-level candidate verification (like
   the University of Maine example earlier this session), not a new
   direct-source integration - different scale of effort than this document
+  is about.
 
 ## Update, 2026-09-12: Parse.bot marketplace, education-listing candidates
 
@@ -264,4 +265,45 @@ PhDportal first (same trusted network already in production, directly
 address the documented Finland gap) - a real sample pull against both,
 matching the DAAD/CSC/ScholarshipPortal verification pattern already used in
 this document, before committing to sync/integrate either.
-  is about.
+
+## Update, 2026-09-12: Mastersportal confirmed, PhDportal ruled out
+
+Real sample pull against both (`client.scholarships.search(destination_country=...)`
+for Mastersportal across all seven supported destinations, `programme_summaries.search(query="scholarship")`
+for PhDportal), not just brand-network reasoning:
+
+**Mastersportal - confirmed, genuinely scholarship-shaped.** Real results
+carry title, deadline, grant amount + currency, provider name, and
+destination - e.g. `"Dr. Franco J. Vaccarino President's Scholarship" |
+deadline='23 Jan 2027' | amount=42500 'CAD' | provider='University of
+Guelph'`. Returned real results for all seven current destinations,
+**including Turkey** (`"Tuition Fee Waivers", Eastern Mediterranean
+University`) - useful the moment Turkey support ships. One real data-quality
+note for whoever builds the connector: several "worldwide"/many-country
+scholarships (Fulbright U.S. Student Program, a Blumenthal Performing Arts
+award) appear identically across *every* destination's query - expected,
+since a global scholarship legitimately matches any destination filter, but
+it means the same award will be discovered repeatedly across destination
+loops within one harvest run. The cross-source dedup fix already shipped
+this session (`link_discovery`'s `normalized_identity_key` check) handles
+this correctly - repeated discoveries of the same title collapse to one
+review task rather than opening several.
+
+**PhDportal - ruled out, wrong data shape.** Despite querying specifically
+for `"scholarship"`, every one of 10 real results returned only
+`tuition_fee_amount` / `tuition_fee_currency` / `tuition_fee_unit` - no
+funding, grant, or scholarship field exists anywhere on the detail object
+(checked every attribute containing "fund", "scholar", "grant", "tuition",
+"fee", or "financ"). This is a PhD **program and tuition-cost** directory,
+not a funding database - the "same trusted StudyPortals network as
+ScholarshipPortal" reasoning that made this look like a strong candidate
+doesn't hold for data shape, only for general site legitimacy. Removed from
+the synced API set (`parse remove phdportal_com_api`) rather than left
+half-integrated.
+
+**Net**: build the Mastersportal harvest connector (same
+`_harvest_parsebot`/`import_feed_records` pattern as the existing two
+sources); do not build one for PhDportal. The Finland-doctoral gap this was
+meant to help with remains open - Mastersportal is masters-focused, so it
+doesn't close that specific gap either, only the general "more discovery
+breadth, including Turkey" goal.
