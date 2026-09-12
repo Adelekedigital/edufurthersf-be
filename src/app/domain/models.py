@@ -245,6 +245,14 @@ class Discovery(TimestampMixin, Base):
     supersedes_discovery_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("discoveries.discovery_id"), nullable=True
     )
+    # Set when link_discovery finds another, earlier discovery from a
+    # *different* source page sharing this row's normalized_identity_key -
+    # the same real-world award reported twice, not a re-crawl of one page
+    # (that's supersedes_discovery_id). A duplicate never gets its own review
+    # task; whoever reviews the original discovery is reviewing this one too.
+    duplicate_of_discovery_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("discoveries.discovery_id"), nullable=True
+    )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (UniqueConstraint("source_page_id", "content_hash"),)
 

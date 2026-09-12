@@ -6,6 +6,7 @@ class LinkOutcome(StrEnum):
     linked = "linked"
     new_candidate = "new_candidate"
     needs_review = "needs_review"
+    duplicate_pending = "duplicate_pending"
 
 
 @dataclass(frozen=True)

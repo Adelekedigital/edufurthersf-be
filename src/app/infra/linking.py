@@ -15,6 +15,36 @@ async def link_discovery(db: AsyncSession, discovery_id: uuid.UUID) -> LinkOutco
     )
     if discovery is None:
         raise LookupError("Discovery not found")
+
+    if discovery.normalized_identity_key:
+        # A different source page reporting the same identity key is the
+        # same real-world award seen twice, not a re-crawl of one page (that
+        # case already has its own lineage via supersedes_discovery_id) -
+        # excluding same-source-page matches keeps that existing chain
+        # untouched. duplicate_of_discovery_id is left null so a chain of
+        # duplicates all points at the one non-duplicate original.
+        # UUIDv7 is time-ordered, so comparing discovery_id directly both
+        # picks only an earlier discovery as "the original" (never a later
+        # one - whichever gets linked first must not treat the other as the
+        # duplicate) and breaks ties without depending on created_at's
+        # timestamp resolution across separate transactions.
+        original_id = await db.scalar(
+            select(Discovery.discovery_id)
+            .where(
+                Discovery.normalized_identity_key == discovery.normalized_identity_key,
+                Discovery.source_page_id != discovery.source_page_id,
+                Discovery.duplicate_of_discovery_id.is_(None),
+                Discovery.discovery_id < discovery.discovery_id,
+            )
+            .order_by(Discovery.discovery_id.asc())
+            .limit(1)
+        )
+        if original_id is not None:
+            discovery.duplicate_of_discovery_id = original_id
+            discovery.processing_state = LinkOutcome.duplicate_pending.value
+            await db.commit()
+            return LinkOutcome.duplicate_pending
+
     candidates = await db.scalars(
         select(Scholarship.scholarship_id).where(Scholarship.name.ilike(discovery.raw_title or ""))
     )

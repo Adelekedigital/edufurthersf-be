@@ -43,6 +43,19 @@ async def _source(db) -> Source:
     return source
 
 
+async def _second_source(db) -> Source:
+    source = Source(
+        name="Tavily Web Search",
+        source_type="web_search",
+        authority_grade="C",
+        approved_domains=["example.test"],
+        active=True,
+    )
+    db.add(source)
+    await db.commit()
+    return source
+
+
 def _record(source_id, url: str, title: str) -> FeedRecord:
     return FeedRecord(source_id=source_id, url=url, title=title, excerpt="An award")
 
@@ -318,6 +331,61 @@ async def test_relinking_a_discovery_does_not_duplicate_its_open_review_task(db)
         )
     )
     assert len(tasks) == 1
+
+
+async def test_two_sources_reporting_the_same_award_do_not_open_two_review_tasks(db) -> None:
+    """The exact bug docs/candidate-verification-standard.md documents: the
+    same award discovered via two different sources must not open a second
+    review task - link_discovery must recognize the second as a pending
+    duplicate of the first, not an independent new_candidate."""
+    first_source = await _source(db)
+    second_source = await _second_source(db)
+    await import_feed_records(
+        db, [_record(first_source.source_id, "https://example.test/a", "Award A")]
+    )
+    await import_feed_records(
+        db, [_record(second_source.source_id, "https://example.test/a2", "Award A")]
+    )
+    discoveries = list(await db.scalars(select(Discovery).order_by(Discovery.created_at)))
+    assert len(discoveries) == 2
+    first, second = discoveries
+
+    assert await link_discovery(db, first.discovery_id) == LinkOutcome.new_candidate
+    assert await link_discovery(db, second.discovery_id) == LinkOutcome.duplicate_pending
+
+    await db.refresh(second)
+    assert second.duplicate_of_discovery_id == first.discovery_id
+    assert second.processing_state == LinkOutcome.duplicate_pending.value
+    tasks = list(await db.scalars(select(ReviewTask)))
+    assert len(tasks) == 1
+
+
+async def test_a_changed_recrawl_of_the_same_page_is_not_treated_as_a_duplicate(db) -> None:
+    """supersedes_discovery_id already handles one page's content changing
+    over time - the new cross-source duplicate check must not also fire for
+    it, since that's the same source page, not a different source."""
+    source = await _source(db)
+    await import_feed_records(db, [_record(source.source_id, "https://example.test/a", "Award A")])
+    first = await db.scalar(select(Discovery))
+    assert await link_discovery(db, first.discovery_id) == LinkOutcome.new_candidate
+
+    # Same URL (same source_page_id), title unchanged but excerpt differs -
+    # a genuine content change, not a repeat, so import creates a new row.
+    record = FeedRecord(
+        source_id=source.source_id,
+        url="https://example.test/a",
+        title="Award A",
+        excerpt="An updated award description",
+    )
+    await import_feed_records(db, [record])
+    discoveries = list(await db.scalars(select(Discovery).order_by(Discovery.created_at)))
+    assert len(discoveries) == 2
+    second = discoveries[1]
+    assert second.supersedes_discovery_id == first.discovery_id
+
+    assert await link_discovery(db, second.discovery_id) == LinkOutcome.new_candidate
+    await db.refresh(second)
+    assert second.duplicate_of_discovery_id is None
 
 
 async def test_the_database_refuses_a_second_open_task_for_one_discovery(db) -> None:
