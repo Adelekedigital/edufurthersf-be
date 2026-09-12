@@ -85,6 +85,10 @@ parse-apis = { path = "parse_apis", editable = true }
 # Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
 # Edit `apis` to curate which of your account APIs this repo syncs;
 # an absent `apis` key means all of them.
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
 [tool.parse]
 
 [[tool.parse.marketplace]]
@@ -107,3 +111,17 @@ slug = "mastersportal_com_api"
 version = 2
 listing_id = "993b59b3-00c5-4fbb-889d-8c5a968962cc"
 source_url = "https://mastersportal.com"
+
+[[tool.parse.marketplace]]
+scraper_id = "b5531142-2817-47a6-8a5a-c9b0f6954a30"
+slug = "opportunitydesk_org_api"
+version = 1
+listing_id = "698f6e64-ff4c-4f4f-93df-87dec233c7c1"
+source_url = "https://opportunitydesk.org/category/grants/"
+
+[[tool.parse.marketplace]]
+scraper_id = "d73272bd-bc1f-4987-8927-3870cd569f5d"
+slug = "fastweb_com_api"
+version = 5
+listing_id = "064fe597-9d53-4406-986d-07162f314768"
+source_url = "https://fastweb.com"

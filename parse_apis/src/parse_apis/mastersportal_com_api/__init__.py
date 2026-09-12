@@ -4,7 +4,7 @@ Source: https://api.parse.bot
 API:    mastersportal.com API (mastersportal_com_api)
 ID:     cac76476-ffa7-4528-886c-5346d93f84db
 Engine: parse_sdk 0.2.0
-Generated at: 2026-09-12T13:40:49.990091+00:00
+Generated at: 2026-09-12T14:08:29.039759+00:00
 """
 
 from __future__ import annotations
