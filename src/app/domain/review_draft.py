@@ -9,7 +9,7 @@ One thing it can draft with real confidence, because it is the same fast,
 objective closure already applied by hand at scale this session (125 of the
 first 247 discoveries): an institution's country is a stable fact from its
 own name, not an evidence-quality judgement call. A destination clearly
-outside the five supported ones is drafted as `reject`. Everything else is
+outside SUPPORTED_DESTINATIONS is drafted as `reject`. Everything else is
 drafted `ambiguous` - never `confident_pass` - because confirming a candidate
 requires fetching and reading the real official source
 (docs/candidate-verification-standard.md), which this heuristic cannot do.
@@ -64,7 +64,7 @@ def draft_review_recommendation(
     if other and not supported:
         named = ", ".join(country_names[code] for code in other)
         reasoning = [
-            f"Destination screen: text names {named}, none of the five supported "
+            f"Destination screen: text names {named}, none of the supported "
             f"destinations ({', '.join(sorted(SUPPORTED_DESTINATIONS))}).",
             "Fast, objective closure - an institution's country is knowable from its "
             "own name, not an evidence-quality call - but this is a text match, not "
