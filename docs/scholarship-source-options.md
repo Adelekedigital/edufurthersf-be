@@ -215,4 +215,53 @@ fetch backs it up:
   scholarships is possible but is provider-level candidate verification (like
   the University of Maine example earlier this session), not a new
   direct-source integration - different scale of effort than this document
+
+## Update, 2026-09-12: Parse.bot marketplace, education-listing candidates
+
+16 candidates were proposed for expanding beyond ScholarshipPortal/PhDScanner.
+Every row below is **real, verified marketplace data** - pulled live via
+`parse search` against the actual account (not brand-name guessing), so the
+slug, endpoint count, and `source_url` are ground truth, not assumptions. Fit
+is a rough first-pass read from that metadata alone; nothing here has had a
+DAAD/CSC-style real-sample-pull verification yet - treat every "fit" call as
+a prioritization signal for *which one to check next*, not a decision to
+integrate.
+
+| Candidate (as named) | Real marketplace listing | Endpoints | Fit | Why |
+| --- | --- | --- | --- | --- |
+| ScholarshipPortal API | `scholarshipportal-com-api` | 6 | **Already integrated** | This is the existing source - not a new addition. |
+| — (not in the original 16, found alongside it) | `phdscanner-com-api` | 3 | **Already integrated** | Also existing - only 3 of its endpoints are currently synced; worth a follow-up check on whether more exist. |
+| Mastersportal API | `mastersportal-com-api` | 1 | **High (~80%)** | Same StudyPortals network as the already-trusted ScholarshipPortal, masters-specific (matches a Finder degree level directly), strong EU/Finland presence - directly relevant to the documented Finland gap. Only 1 endpoint though - thin surface, verify what it actually returns before committing engineering time. |
+| PhDportal API | `phdportal-com-api` | 2 | **High (~80%)** | Same trusted network, doctorate-specific - directly relevant to the Finland *doctoral* gap specifically (Finland's structural gap is doctoral funding, not masters). |
+| Opportunity Desk API | `opportunitydesk-org-api` | 2 | **Medium-high (~65%)** | `source_url` resolves to the site's own "grants" category page - a good sign it's actually funding-relevant, not just general opportunities. Same Tier-C discovery-breadth bucket as the existing two sources. |
+| Fastweb API | `fastweb-com-api` | 8 | **High for volume (~75%)** | One of the largest, most established US scholarship databases; richest endpoint surface of any pure-scholarship candidate found. Same geographic caveat as Scholarships.com: US-only, doesn't touch the Finland/GB skew. |
+| CareerOneStop API (.org) | `careeronestop-org-api` | 2 | **Medium (~65%)** | `source_url` is literally CareerOneStop's own scholarship-finder tool page - confirmed genuinely scholarship-specific, not general career content. Only 2 endpoints (thin), US-only. |
+| CareerOneStop API (.com) | `careeronestop-com-api` | 4 | **Low-medium (~50%)** | A *separate* listing from `.org` (confirmed real, not a duplicate) - `source_url` is just the bare homepage, so it's unverified whether these 4 endpoints are scholarship-specific or CareerOneStop's broader career/workforce content. Check before assuming it's the same shape as `.org`. |
+| CollegeBoard API | `bigfuture-collegeboard-org-api` | 4 | **Medium (~60%)** | Actually BigFuture (College Board's search tool), not CollegeBoard generally. Historically an undergrad-admissions brand - worth confirming it has real *graduate*-level scholarship content before assuming fit, given Finder only covers masters/mba/doctorate. |
+| US News API | `usnews-com-api` | 1 | **Medium (~55%)** | `source_url` confirms it's specifically the scholarships-search feature, not general rankings - but only 1 endpoint, very thin. Worth a quick check of what that one endpoint returns. |
+| GradSchools API | `gradschools-com-api` | 6 | **Low-medium (~45%)** | A US grad-program directory, not primarily a scholarship database - may have some financial-aid content attached to program listings. US-only. |
+| UCAS API | `ucas-com-api` | 8 | **Low-medium (~45%)** | Richest endpoint count among the ambiguous ones, but `source_url` is just the bare homepage - unclear if scholarship data is even modeled vs. general admissions data. Also GB-specific, and GB is *already* overrepresented per the catalog gap analysis - this would work against the stated Finland/Canada priority, not toward it. |
+| TopUniversities API | `topuniversities-com-api` | 5 | **Low (~35%)** | QS rankings/profile site - scholarship content, if any, is likely secondary to rankings. |
+| Times Higher Education API | `timeshighereducation-com-api` | 4 | **Low (~35%)** | Same profile as TopUniversities - rankings-first, not a scholarship database. |
+| Hotcourses Abroad API | `hotcoursesabroad-com-api` | 2 | **Low (~25%)** | `source_url` resolves to a *rankings* page (`/study/rankings/hdi.html`), not a scholarship or funding page - the marketplace listing itself suggests this wraps country/ranking comparison data, not funding data. |
+| TheGradCafe API | `thegradcafe-com-api` | 2 | **Low (~15%), not recommended** | Confirmed wrong data shape: GradCafe is a self-reported admissions-*results* tracker (who got accepted/rejected where), not a funding database. |
+| ApplyBoard API | `id-applyboard-com-api` | 1 | **Very low (~10%), not recommended** | The only marketplace listing found is `id.applyboard.com` - their identity/login portal, not their program or scholarship catalog. ApplyBoard's actual catalog data doesn't appear to be exposed here. |
+| Gov API (Turkiye) | `y-k-atlas-api` (YÖK Atlas, `yokatlas.yok.gov.tr`) | 5 | **Potentially high (~70-80%), but blocked** | Found it: Turkey's official Higher Education Council program atlas - a genuine government source (a real `authority_grade="A"` candidate, unlike every Tier-C aggregator above), not a random hit. **But Turkey ("TR") isn't in `SUPPORTED_DESTINATIONS` or `SEED_COUNTRIES`** (`src/app/domain/countries.py:16,20` - confirmed by reading the actual code) - it can't be used as a study-destination source until that's added, a separate small prerequisite change. Also unverified: whether YÖK Atlas actually models *scholarship/funding* data specifically, or just university/program listings - its name suggests the latter; worth checking before assuming it fills the funding-data role. |
+
+**Bonus find, not in the original list:** `bachelorsportal-com-api` (2
+endpoints) - same StudyPortals network as Mastersportal/PhDportal, but
+undergraduate-only. Not applicable - Finder doesn't offer a `bachelors`
+degree level.
+
+**On the Turkey callout specifically:** confirmed, Turkey is missing from
+both the destination list and the local origin-country seed. Worth its own
+small decision independent of the YÖK Atlas question: is Turkey a market
+worth adding coverage for at all, separate from whether this specific API is
+the right way to source it once it is.
+
+**Recommended next check, given all of the above:** Mastersportal and
+PhDportal first (same trusted network already in production, directly
+address the documented Finland gap) - a real sample pull against both,
+matching the DAAD/CSC/ScholarshipPortal verification pattern already used in
+this document, before committing to sync/integrate either.
   is about.
