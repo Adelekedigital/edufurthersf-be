@@ -368,3 +368,49 @@ screening it already does for every other Tier-C source. Both stay US-only
 (Fastweb) or globally-scattered-but-not-destination-targeted (Opportunity
 Desk) - neither closes the Finland/GB skew specifically, both add to the
 "more genuine sources, don't dry out of data" goal directly.
+
+## Update, 2026-09-12: CareerOneStop confirmed; YÖK Atlas and BigFuture ruled out
+
+Real sample pull against all three next-highest-fit candidates:
+
+**CareerOneStop (.org) - confirmed, high fit.** `scholarship_summaries.search(keyword=...,
+level_of_study=LevelOfStudy.GRADUATE, ...)` returns genuine graduate-level
+scholarship data: real names, real organizations, real amounts ($1,500 up
+to AAUW's $20,000-$50,000 fellowships), real detailed qualifications text.
+AAUW's fellowships explicitly require "identify as a woman" - the same
+demographic-eligibility pattern already handled via `eligibility_note`
+elsewhere. `.details()` calls hit intermittent upstream `HTTP 502`s (roughly
+2 of 15 sampled) - a real-world reliability signal to build the same
+log-and-skip resilience `_harvest_parsebot` already has for a single
+destination/level's fetch failing, not a data-quality problem. Worth a
+harvest connector.
+
+**YÖK Atlas - ruled out.** Has a `scholarship` field, but its real values are
+categorical: `"Burslu"` (state-funded seat) vs `"Ücretli"` (fee-paying seat)
+on a *university admission placement* record (Turkey's ÖSYM
+central-placement system - `min_score`, `quota`, `success_rank` are all
+admission-cutoff concepts, not scholarship-application concepts). There is
+no deadline, no application URL, no distinct award identity separate from
+"which seats in this program don't charge tuition." This is a university
+program/admissions atlas, not a scholarship database - the same
+brand-versus-data-shape mistake as PhDportal, just via "it's an official
+government source" reasoning instead of "same trusted network" reasoning.
+Removed from the synced set.
+
+**BigFuture (College Board) - ruled out.** 15 real results sampled across
+three states (`TX`/`CA`/`NY`) - **zero** were graduate-level. Every single
+one was High School (Freshman through Senior) or Undergraduate (College
+Freshman through "Nth Year," Community College) - confirms BigFuture is a
+high-school-to-undergraduate college-prep tool, College Board's core
+business, with no graduate content at all. Not a data-quality problem -
+Finder only offers `masters`/`mba`/`doctorate`, so this source has nothing
+in scope regardless of how it's filtered. Removed from the synced set.
+
+**Net**: 3 of 16 original candidates now confirmed-and-actionable
+(Mastersportal, Opportunity Desk, Fastweb) plus this round's CareerOneStop -
+**4 verified sources with connectors still to build**, alongside the 2
+already-active ones. 3 of 16 confirmed wrong fits (PhDportal, YÖK Atlas,
+BigFuture) - all removed rather than left half-integrated. Remaining
+unverified, in fit order: CareerOneStop (.com) (may or may not be the same
+shape as `.org` - unconfirmed), US News, GradSchools, UCAS, TopUniversities,
+Times Higher Education, Hotcourses Abroad.
