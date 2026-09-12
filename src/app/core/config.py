@@ -93,6 +93,18 @@ class Settings(BaseSettings):
     refresh_status_batch_limit: int = 500
     reverify_due_batch_limit: int = 100
 
+    # External research APIs that widen scholarship discovery/verification
+    # beyond Parse.bot. Plain HTTP, no vendor SDK - matching how this
+    # codebase already calls the AI Router/Core/QStash directly. The limits
+    # exist because nothing tracked usage against any external quota before
+    # these - see app/infra/research_budget.py for enforcement. A key left
+    # unset keeps that provider off entirely, the same pattern
+    # POSTHOG_API_KEY already uses.
+    tavily_api_key: str | None = None
+    tavily_monthly_search_limit: int = 900
+    jina_api_key: str | None = None
+    jina_monthly_call_limit: int = 500
+
     @field_validator("database_url")
     @classmethod
     def use_async_database_driver(cls, value: str) -> str:
