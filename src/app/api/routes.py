@@ -150,6 +150,8 @@ def _source_read(source: Source) -> SourceRead:
         authority_grade=source.authority_grade,
         approved_domains=source.approved_domains,
         active=source.active,
+        consecutive_harvest_failures=source.consecutive_harvest_failures,
+        last_harvest_failure_at=source.last_harvest_failure_at,
     )
 
 
