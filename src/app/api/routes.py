@@ -384,8 +384,9 @@ def _parse_job(raw_body: bytes) -> JobRequest:
 #: sync_countries joins harvest_parsebot here, not the quarter-hour set below
 #: - Core's country list changes rarely, and (unlike harvest_parsebot) we're
 #: not trying to run this sub-weekly, so the week-scoped key has no cadence
-#: bug for it.
-RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot", "sync_countries"})
+#: bug for it. harvest_tavily joins them for the same reason as
+#: harvest_parsebot: a weekly cadence, gated by its own monthly budget.
+RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot", "harvest_tavily", "sync_countries"})
 #: Same static-body-recurring-schedule pattern as RECURRING_WEEKLY_KINDS,
 #: just finer-grained: the data-verification standard calls for a sweep at
 #: least every 15 minutes, so a QStash *schedule* redelivers a static body

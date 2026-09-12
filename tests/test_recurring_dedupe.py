@@ -29,6 +29,10 @@ def test_sync_countries_is_a_recurring_weekly_kind() -> None:
     assert "sync_countries" in RECURRING_WEEKLY_KINDS
 
 
+def test_harvest_tavily_is_a_recurring_weekly_kind() -> None:
+    assert "harvest_tavily" in RECURRING_WEEKLY_KINDS
+
+
 def test_weekly_dedupe_key_is_stable_within_the_same_call() -> None:
     first = _weekly_dedupe_key("harvest_parsebot")
     second = _weekly_dedupe_key("harvest_parsebot")
