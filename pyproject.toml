@@ -89,6 +89,14 @@ parse-apis = { path = "parse_apis", editable = true }
 # Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
 # Edit `apis` to curate which of your account APIs this repo syncs;
 # an absent `apis` key means all of them.
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
 [tool.parse]
 
 [[tool.parse.marketplace]]
@@ -125,3 +133,10 @@ slug = "fastweb_com_api"
 version = 5
 listing_id = "064fe597-9d53-4406-986d-07162f314768"
 source_url = "https://fastweb.com"
+
+[[tool.parse.marketplace]]
+scraper_id = "00e357bc-4084-4a64-8666-7e753b59ce13"
+slug = "careeronestop_org_api"
+version = 1
+listing_id = "41d1f415-3538-40f9-8e51-bcd8ac968648"
+source_url = "https://www.careeronestop.org/Toolkit/Training/find-scholarships.aspx"
