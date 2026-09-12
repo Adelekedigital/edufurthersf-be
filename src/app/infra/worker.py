@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.ingestion_schemas import FeedRecord
 from app.core.config import get_settings
 from app.domain.ai_router import AIRouterOutcome, AIRouterRequest, AITask
-from app.domain.countries import SUPPORTED_DESTINATIONS
+from app.domain.countries import SEED_COUNTRIES, SUPPORTED_DESTINATIONS
 from app.domain.extraction import extract_candidate_facts
 from app.domain.models import Discovery, ReviewTask, Source
 from app.domain.normalization import normalize_discovery
@@ -25,6 +25,7 @@ from app.domain.parsebot_harvest import (
     scholarship_to_record,
 )
 from app.domain.review_draft import draft_review_recommendation
+from app.domain.tavily_harvest import TAVILY_SOURCE_NAME, tavily_result_to_record
 from app.infra.ai_router_client import AIRouterClient
 from app.infra.core_catalogue import CoreCatalogueClient
 from app.infra.countries import load_vocabulary, sync_countries
@@ -40,7 +41,9 @@ from app.infra.jobs import (
 from app.infra.linking import link_discovery
 from app.infra.outbox import dispatch_analytics_events
 from app.infra.parsebot_client import fetch_phdscanner, fetch_scholarshipportal
+from app.infra.research_budget import reserve_call
 from app.infra.source_persistence import fetch_and_persist_page
+from app.infra.tavily_client import search_tavily
 
 logger = logging.getLogger("app.infra.worker")
 
@@ -69,6 +72,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await _prepare_review(db, job.payload)
         elif job.kind == "harvest_parsebot":
             await _harvest_parsebot(db)
+        elif job.kind == "harvest_tavily":
+            await _harvest_tavily(db)
         elif job.kind == "refresh_status":
             await refresh_due_statuses(db)
         elif job.kind == "reverify_due":
@@ -366,6 +371,97 @@ async def _harvest_parsebot(db: AsyncSession) -> None:
         "parsebot_harvest_completed",
         extra={
             "skipped": skipped,
+            "imported": outcome.imported,
+            "repeated": outcome.repeated,
+            "changed": outcome.changed,
+            "rejected": outcome.rejected,
+        },
+    )
+
+
+#: Two phrasings per destination cover the graduate/doctoral split without
+#: needing a third-party study-level filter the way Parse.bot's APIs have -
+#: Tavily has none, so the query text itself carries that intent.
+_TAVILY_QUERY_TEMPLATES = (
+    "graduate scholarships {country} international students",
+    "PhD scholarships {country} international students",
+)
+
+
+async def _harvest_tavily(db: AsyncSession) -> None:
+    """Pull candidate URLs from Tavily's web search (Tier C discovery, the
+    same evidentiary bucket as harvest_parsebot - see
+    docs/candidate-verification-standard.md).
+
+    Deliberately open, not domain-filtered: reviewers already triage every
+    Tier-C discovery by hand, the same as ScholarshipRegion/Parse.bot, so
+    restricting results to an allowlist here would only risk silently
+    dropping a real source before a human ever saw it - the manual spike
+    that validated this job found real signal on domains that would fail
+    almost any static filter (see docs/scholarship-source-options.md).
+
+    The kill switch is Source.active, matching harvest_parsebot.
+    reserve_call gates every search against the shared monthly budget
+    (research_budget.py); once refused, the run stops early rather than
+    failing the job, keeping whatever it already found this run - the same
+    "partial harvest beats losing everything" reasoning harvest_parsebot
+    already uses for a single destination's fetch failing.
+    """
+    settings = get_settings()
+    source = await db.scalar(
+        select(Source).where(Source.name == TAVILY_SOURCE_NAME, Source.active.is_(True))
+    )
+    if source is None:
+        logger.info("tavily_harvest_skipped", extra={"reason": "no_active_source"})
+        return
+    if not settings.tavily_api_key:
+        logger.info("tavily_harvest_skipped", extra={"reason": "not_configured"})
+        return
+
+    harvested_at = datetime.now(UTC)
+    records: list[FeedRecord] = []
+    skipped = 0
+    budget_exhausted = False
+
+    for destination in sorted(SUPPORTED_DESTINATIONS):
+        if budget_exhausted:
+            break
+        country_name = SEED_COUNTRIES.get(destination, destination)
+        for template in _TAVILY_QUERY_TEMPLATES:
+            if not await reserve_call(db, "tavily", settings.tavily_monthly_search_limit):
+                budget_exhausted = True
+                break
+            query = template.format(country=country_name)
+            try:
+                raw_items = await search_tavily(query, settings.tavily_api_key)
+            except httpx.HTTPError:
+                logger.warning(
+                    "tavily_fetch_failed", extra={"destination": destination, "query": query}
+                )
+                continue
+            for raw in raw_items:
+                appended = _map_and_append(
+                    records,
+                    source_id=source.source_id,
+                    raw=raw,
+                    to_record=tavily_result_to_record,
+                    harvested_at=harvested_at,
+                )
+                skipped += not appended
+
+    if not records:
+        logger.info(
+            "tavily_harvest_empty",
+            extra={"skipped": skipped, "budget_exhausted": budget_exhausted},
+        )
+        return
+
+    outcome = await import_feed_records(db, records)
+    logger.info(
+        "tavily_harvest_completed",
+        extra={
+            "skipped": skipped,
+            "budget_exhausted": budget_exhausted,
             "imported": outcome.imported,
             "repeated": outcome.repeated,
             "changed": outcome.changed,
