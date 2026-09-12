@@ -414,3 +414,66 @@ BigFuture) - all removed rather than left half-integrated. Remaining
 unverified, in fit order: CareerOneStop (.com) (may or may not be the same
 shape as `.org` - unconfirmed), US News, GradSchools, UCAS, TopUniversities,
 Times Higher Education, Hotcourses Abroad.
+
+## Update, 2026-09-12: Tavily + Jina.ai manual spike (Plan Step 4/5, pre-build)
+
+Parse.bot hit its account-wide daily request cap (100 req/day, independent
+of the 130 purchased credits still remaining) mid-way through verifying the
+three newest candidates, so this round is a manual spike of the other two
+planned providers instead - exactly the "cheap spike before building the
+pipeline" step the plan called for before investing in `tavily_client.py`,
+`jina_client.py`, the `harvest_tavily` job, or any budget-tracking wiring
+around them. No connector code was written; this is real HTTP calls via
+`httpx` straight from a throwaway script, reading `Settings.tavily_api_key`
+/ `Settings.jina_api_key` (both set locally in `.env`, confirmed present by
+length only, never printed).
+
+**Tavily - real signal, but mixed, and it's genuinely a *search* API, not a
+scholarship API.** Four representative discovery queries (graduate/Canada,
+PhD/Germany, masters/Finland, doctoral/Turkey) each returned 5 results.
+Real signal showed up in every query: government/institutional portals
+(`educanada.ca`, `studyinfinland.fi`, and notably
+`turkiyeburslari.gov.tr` - see below), and real university pages
+(`utoronto.ca`, `lakeheadu.ca`, `uef.fi`, `helsinki.fi`, `ku.edu.tr`). Real
+noise showed up too: YouTube videos and SEO/content-mill aggregator sites
+(`wemakescholars.com`, `scholarshipca.com`, `faithedigold.com`,
+`applykite.com`) - the kind of source the candidate-verification standard
+already treats as non-evidence. Confirms the plan's stated risk honestly:
+this is not free volume, it needs filtering to be worth automating.
+
+**The most valuable single finding wasn't a discovery-pipeline record - it
+was a new direct-source candidate.** One Tavily result surfaced
+`turkiyeburslari.gov.tr` - Türkiye's actual official state scholarship
+portal (Türkiye Bursları), fetched and read directly (not just a snippet).
+This is a materially stronger Turkey source than YÖK Atlas, which this
+session already ruled out for being an admissions atlas with no real award
+data (see above). Same shape as the existing DAAD/CSC direct-source
+pattern: worth registering as its own `Source` row and reviewing by hand,
+independent of whether an automated Tavily harvest job ever gets built.
+
+**Jina.ai Reader - clean, reliable fetches on both real tests.** First
+attempt used a guessed, stale URL (`www2.daad.de`) and got a real 404 - a
+bad test input, not a Jina failure. Retried against two URLs Tavily had
+just confirmed live: a University of Eastern Finland tuition/scholarships
+page (17,129 chars of clean markdown, correctly extracted tuition and
+waiver content) and the Türkiye Bursları PhD scholarships page (6,931
+chars of clean markdown, correctly extracted from a non-US government
+site). Both fetches were fast, both returned genuinely readable content
+suitable for the same extraction/review path the raw `httpx` fetcher
+already feeds - no JS-rendering or bot-blocking problems on either site.
+This also validates the realistic "Tavily discovers a URL, Jina fetches
+it" pipeline shape end to end, not just each provider in isolation.
+
+**Recommendation:** Jina.ai is validated enough to build Step 5
+(fetch-fallback, gated behind `reserve_call`) as originally planned - no
+open questions left to spike. Tavily is real but noisy enough that a raw
+"loop over destination x degree-level queries, import every result" harvest
+job (as originally sketched) would likely add reviewer burden along with
+real candidates; worth either restricting an automated job to
+authoritative-looking domains (`.gov`, `.edu`, `.ac.*`) before a record
+ever reaches `import_feed_records`, or leaning on Tavily first as a
+human-in-the-loop *source-discovery* tool (as it just proved itself to be
+with `turkiyeburslari.gov.tr`) rather than a fully automated Tier-C feed.
+Immediate, low-risk next step either way: register `turkiyeburslari.gov.tr`
+as a direct `Source` now, independent of the larger Tavily connector
+decision.
