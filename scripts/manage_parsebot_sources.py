@@ -1,8 +1,8 @@
-"""Register, activate, or deactivate the two Parse.bot-backed Sources the
+"""Register, activate, or deactivate the Parse.bot-backed Sources the
 weekly harvest job (`harvest_parsebot`) looks up by name.
 
-Deactivating either one is the app-level kill switch: `harvest_parsebot`
-skips that API's network calls entirely on its next run, no redeploy needed,
+Deactivating one is the app-level kill switch: `harvest_parsebot` skips
+that API's network calls entirely on its next run, no redeploy needed,
 using the existing admin endpoints (`POST /internal/admin/sources`,
 `POST /internal/admin/sources/{id}/deactivate`). For a hard stop on the
 QStash schedule itself, see scripts/manage_parsebot_schedule.py pause.
@@ -11,8 +11,8 @@ Usage (uv run python scripts/manage_parsebot_sources.py <command> ...,
 each needs --base-url https://your-app.example.com --token $env:INTERNAL_SERVICE_TOKEN):
     create
     deactivate --which scholarshipportal
-    deactivate --which phdscanner
-    deactivate --which both
+    deactivate --which mastersportal
+    deactivate --which all
 """
 
 from __future__ import annotations
@@ -22,7 +22,14 @@ import os
 
 import httpx
 
-from app.domain.parsebot_harvest import PHDSCANNER_SOURCE_NAME, SCHOLARSHIPPORTAL_SOURCE_NAME
+from app.domain.parsebot_harvest import (
+    CAREERONESTOP_SOURCE_NAME,
+    FASTWEB_SOURCE_NAME,
+    MASTERSPORTAL_SOURCE_NAME,
+    OPPORTUNITYDESK_SOURCE_NAME,
+    PHDSCANNER_SOURCE_NAME,
+    SCHOLARSHIPPORTAL_SOURCE_NAME,
+)
 
 SOURCES = {
     "scholarshipportal": {
@@ -39,6 +46,34 @@ SOURCES = {
         "approved_domains": ["phdscanner.com"],
         "active": True,
     },
+    "mastersportal": {
+        "name": MASTERSPORTAL_SOURCE_NAME,
+        "source_type": "parsebot_api",
+        "authority_grade": "C",
+        "approved_domains": ["mastersportal.com"],
+        "active": True,
+    },
+    "opportunitydesk": {
+        "name": OPPORTUNITYDESK_SOURCE_NAME,
+        "source_type": "parsebot_api",
+        "authority_grade": "C",
+        "approved_domains": ["opportunitydesk.org"],
+        "active": True,
+    },
+    "fastweb": {
+        "name": FASTWEB_SOURCE_NAME,
+        "source_type": "parsebot_api",
+        "authority_grade": "C",
+        "approved_domains": ["fastweb.com"],
+        "active": True,
+    },
+    "careeronestop": {
+        "name": CAREERONESTOP_SOURCE_NAME,
+        "source_type": "parsebot_api",
+        "authority_grade": "C",
+        "approved_domains": ["careeronestop.org"],
+        "active": True,
+    },
 }
 
 
@@ -53,7 +88,7 @@ def create(args: argparse.Namespace) -> int:
 
 
 def _which(args: argparse.Namespace) -> list[str]:
-    return list(SOURCES) if args.which == "both" else [args.which]
+    return list(SOURCES) if args.which == "all" else [args.which]
 
 
 def deactivate(args: argparse.Namespace) -> int:
@@ -82,9 +117,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("create").set_defaults(func=create)
     p_deactivate = sub.add_parser("deactivate")
-    p_deactivate.add_argument(
-        "--which", choices=["scholarshipportal", "phdscanner", "both"], default="both"
-    )
+    p_deactivate.add_argument("--which", choices=[*SOURCES, "all"], default="all")
     p_deactivate.set_defaults(func=deactivate)
 
     args = parser.parse_args()

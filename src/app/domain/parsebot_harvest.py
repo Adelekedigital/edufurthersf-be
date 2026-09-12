@@ -22,6 +22,10 @@ from datetime import UTC, datetime
 #: without redeploying anything.
 SCHOLARSHIPPORTAL_SOURCE_NAME = "ScholarshipPortal (via Parse.bot)"
 PHDSCANNER_SOURCE_NAME = "PhDScanner (via Parse.bot)"
+MASTERSPORTAL_SOURCE_NAME = "Mastersportal (via Parse.bot)"
+OPPORTUNITYDESK_SOURCE_NAME = "Opportunity Desk (via Parse.bot)"
+FASTWEB_SOURCE_NAME = "Fastweb (via Parse.bot)"
+CAREERONESTOP_SOURCE_NAME = "CareerOneStop (via Parse.bot)"
 
 
 @dataclass(frozen=True)
@@ -76,3 +80,87 @@ def opportunity_to_record(raw: dict, *, harvested_at: datetime) -> HarvestedReco
         else harvested_at
     )
     return HarvestedRecord(title=title, url=url, excerpt=excerpt, feed_created_at=feed_created_at)
+
+
+def mastersportal_to_record(raw: dict, *, harvested_at: datetime) -> HarvestedRecord | None:
+    """Map one Mastersportal `Scholarship` (as a plain dict) to a record.
+
+    No per-item discovery timestamp on this API either, so `feed_created_at`
+    is this harvest run's own time, same fallback as ScholarshipPortal's.
+    """
+    title = (raw.get("title") or "").strip()
+    url = (raw.get("url") or "").strip()
+    if not title or not url:
+        return None
+    amount = raw.get("grant_amount")
+    currency = raw.get("grant_currency")
+    amount_text = f"{amount} {currency}".strip() if amount else None
+    parts = [
+        part
+        for part in (
+            raw.get("provider_name"),
+            raw.get("grant_description") or raw.get("description"),
+            raw.get("deadline"),
+            amount_text,
+        )
+        if part
+    ]
+    excerpt = " | ".join(str(part) for part in parts) or None
+    return HarvestedRecord(title=title, url=url, excerpt=excerpt, feed_created_at=harvested_at)
+
+
+def opportunitydesk_to_record(raw: dict, *, harvested_at: datetime) -> HarvestedRecord | None:
+    """Map one Opportunity Desk `Grant` detail (as a plain dict) to a record.
+
+    `application_url` is the empirically-found filter (see
+    docs/scholarship-source-options.md's 2026-09-12 update) that separates
+    real, individual grants from aggregate "roundup" blog posts: every real
+    grant sampled had one set, every roundup had `application_url is None`.
+    Used as the record's own url (the real external destination a reviewer
+    should visit), not Opportunity Desk's own post link - dropping this
+    record entirely, not falling back to the post link, if it's missing.
+    """
+    title = (raw.get("title") or "").strip()
+    url = (raw.get("application_url") or "").strip()
+    if not title or not url:
+        return None
+    countries = raw.get("eligible_countries")
+    countries_text = ", ".join(countries) if isinstance(countries, list) and countries else None
+    parts = [
+        part for part in (raw.get("grant_amount"), raw.get("deadline"), countries_text) if part
+    ]
+    excerpt = " | ".join(str(part) for part in parts) or None
+    return HarvestedRecord(title=title, url=url, excerpt=excerpt, feed_created_at=harvested_at)
+
+
+def fastweb_to_record(raw: dict, *, harvested_at: datetime) -> HarvestedRecord | None:
+    """Map one Fastweb `Scholarship` (as a plain dict) to a record."""
+    title = (raw.get("title") or "").strip()
+    url = (raw.get("detail_url") or "").strip()
+    if not title or not url:
+        return None
+    parts = [part for part in (raw.get("provider"), raw.get("award"), raw.get("deadline")) if part]
+    excerpt = " | ".join(str(part) for part in parts) or None
+    return HarvestedRecord(title=title, url=url, excerpt=excerpt, feed_created_at=harvested_at)
+
+
+def careeronestop_to_record(raw: dict, *, harvested_at: datetime) -> HarvestedRecord | None:
+    """Map one CareerOneStop `ScholarshipSummary` (as a plain dict) to a
+    record. `name` is this API's title field; `url` is the award's own
+    detail page on careeronestop.org."""
+    title = (raw.get("name") or "").strip()
+    url = (raw.get("url") or "").strip()
+    if not title or not url:
+        return None
+    parts = [
+        part
+        for part in (
+            raw.get("organization"),
+            raw.get("purpose"),
+            raw.get("award_amount"),
+            raw.get("deadline"),
+        )
+        if part
+    ]
+    excerpt = " | ".join(str(part) for part in parts) or None
+    return HarvestedRecord(title=title, url=url, excerpt=excerpt, feed_created_at=harvested_at)
