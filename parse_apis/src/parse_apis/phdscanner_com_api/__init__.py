@@ -4,7 +4,7 @@ Source: https://api.parse.bot
 API:    phdscanner.com API (phdscanner_com_api)
 ID:     7939701b-6ecc-48e4-8084-b024250fa10c
 Engine: parse_sdk 0.2.0
-Generated at: 2026-09-12T13:40:49.986743+00:00
+Generated at: 2026-09-12T14:08:29.036882+00:00
 """
 
 from __future__ import annotations

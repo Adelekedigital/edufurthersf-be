@@ -4,7 +4,7 @@ Source: https://api.parse.bot
 API:    scholarshipportal.com API (scholarshipportal_com_api)
 ID:     d8ac1888-45af-4a2b-9aee-a54938204f94
 Engine: parse_sdk 0.2.0
-Generated at: 2026-09-12T13:40:49.977495+00:00
+Generated at: 2026-09-12T14:08:29.028651+00:00
 """
 
 from __future__ import annotations

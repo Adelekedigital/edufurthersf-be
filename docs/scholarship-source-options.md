@@ -307,3 +307,64 @@ sources); do not build one for PhDportal. The Finland-doctoral gap this was
 meant to help with remains open - Mastersportal is masters-focused, so it
 doesn't close that specific gap either, only the general "more discovery
 breadth, including Turkey" goal.
+
+## Update, 2026-09-12: Opportunity Desk and Fastweb - both real, both messier than Mastersportal
+
+Real sample pull against both (`grant_summaries.list(search=...)` + `.details()`
+across "scholarship"/"PhD"/"graduate"/"masters" for Opportunity Desk;
+`featured()`/`by_major()`/`by_state()` for Fastweb) - the goal here is
+maximizing genuine source breadth, so "messier than Mastersportal" is a
+real finding to plan around, not a reason to drop either.
+
+**Opportunity Desk - real signal, but roughly half of every query's top
+results are aggregate "roundup" blog posts, not individual awards.**
+Genuine individual grants do appear and look real and verifiable: AI Nation
+Grant & Accelerator Program (Germany, €54,000, real application URL),
+Conservation Nation Grant Program ($5,000, real URL), two distinct
+University of Bayreuth grant tiers, ASEAN-Korea Young Scholar Research
+Grant, Olympic Studies Centre's PhD research grant (though this one surfaced
+under two near-identical titles across different queries - a real
+near-duplicate risk, not just a hypothetical one, for the
+`normalized_identity_key` dedup path). But titles like `"94 Grants,
+Scholarships Fellowships and Other Opportunities Closing in September..."`
+or `"75 Scholarships, Grants, Fellowships... with Deadlines in August
+2026"` are recurring listicle roundups, not distinct institutional awards -
+exactly the pattern `candidate-verification-standard.md`'s auto-reject bar
+already names ("the listing isn't a distinct institutional award at all").
+Their `deadline`/`amount`/`countries` fields are correspondingly garbage for
+harvesting purposes - a vague date fragment or, in one case, a chunk of the
+post's own body text where a deadline should be; an amount range spanning
+many unrelated awards; a country list that's the union of everyone in the
+post, not one award's real eligibility.
+
+**A clean, empirically-found filter:** every genuine individual grant in the
+sample had a real `application_url`; every roundup post had `apply=None`.
+Filtering on "`application_url` is not null" before ever creating a
+`FeedRecord` would keep the real signal and drop the roundup noise
+automatically, without waiting for a human reviewer to reject each one -
+worth building into the harvest connector itself, not left as a manual
+review-queue cost.
+
+**Fastweb - confirmed real, high-quality individual awards, with two scope
+caveats.** `by_major`/`featured` results are legitimate, well-known,
+independently-verifiable programs (Regeneron Science Talent Search, an NSF
+SBIR postdoctoral fellowship, a VA STEM scholarship, an NSA scholarship
+program, a real university-specific award) - clearly real data, not
+scraped noise. Two things to plan around, not blockers: (1) most results
+skew undergraduate or level-unspecified ("Grad School No Essay Scholarship"
+was one of the few explicitly graduate-labeled results) - the same
+graduate-level filtering already applied by hand to other sources would
+need to apply here too; (2) `by_state` results include things that aren't
+scholarships under Finder's `award_type` taxonomy at all (a student film
+*contest*, a tuition-reciprocity *exchange program*, a veterans *benefits*
+program) - real programs, wrong schema, would need the same
+`award_type`-fit screening every other source already gets.
+
+**Net**: both are worth building harvest connectors for (same
+`_harvest_parsebot`/`import_feed_records` pattern) - Opportunity Desk with
+the `application_url`-not-null filter built in from the start, Fastweb as-is
+with the existing manual review queue handling the level/award-type
+screening it already does for every other Tier-C source. Both stay US-only
+(Fastweb) or globally-scattered-but-not-destination-targeted (Opportunity
+Desk) - neither closes the Finland/GB skew specifically, both add to the
+"more genuine sources, don't dry out of data" goal directly.
