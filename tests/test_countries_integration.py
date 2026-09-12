@@ -63,6 +63,24 @@ async def test_sync_never_overwrites_finder_coverage(db) -> None:
     assert kenya.is_supported_destination is True
 
 
+async def test_a_row_that_predates_its_own_support_still_picks_it_up(db) -> None:
+    """The common case: Core lists a country long before Finder decides to
+    support it as a destination. A row inserted before its code was ever in
+    SUPPORTED_DESTINATIONS must still flip to True on a later sync, not stay
+    stuck at whatever was true on first insert forever (the actual bug found
+    2026-09-12: AU and TR were both added to SUPPORTED_DESTINATIONS but
+    their already-existing rows never picked it up)."""
+    await sync_countries(db, _FakeCore([_entry("CA", "Canada")]))
+    canada = await db.scalar(select(Country).where(Country.code == "CA"))
+    canada.is_supported_destination = False
+    await db.commit()
+
+    # CA is a real SUPPORTED_DESTINATIONS member - re-syncing must pick it up.
+    await sync_countries(db, _FakeCore([_entry("CA", "Canada")]))
+    await db.refresh(canada)
+    assert canada.is_supported_destination is True
+
+
 async def test_an_empty_response_is_refused(db) -> None:
     """A truncated fetch must not empty the vocabulary search validates against."""
     await sync_countries(db, _FakeCore([_entry("NG", "Nigeria")]))
