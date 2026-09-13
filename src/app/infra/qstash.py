@@ -157,5 +157,6 @@ ALLOWED_JOB_KINDS = frozenset(
         "harvest_parsebot",
         "harvest_tavily",
         "sweep_due_jobs",
+        "auto_approve_sweep",
     }
 )

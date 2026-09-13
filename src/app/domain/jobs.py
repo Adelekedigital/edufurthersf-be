@@ -18,6 +18,7 @@ RETRYABLE_KINDS = {
     "refresh_status",
     "reverify_due",
     "sweep_due_jobs",
+    "auto_approve_sweep",
 }
 
 

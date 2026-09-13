@@ -136,6 +136,16 @@ class ScholarshipCycle(TimestampMixin, Base):
     #: to auto-restore the former on a confirmed unchanged recheck, without
     #: ever promoting the latter. See migrations/0022_cycle_auto_downgraded.py.
     auto_downgraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: True only for a cycle `auto_approve_sweep` published unsupervised -
+    #: never set for anything a human reviewer approved and published
+    #: through the ordinary decision/publish endpoints. The visible
+    #: distinction the standard requires: an auto-approved record must never
+    #: be indistinguishable from a reviewer-approved one.
+    is_auto_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: The diagnostic score at decision time (see domain/auto_approval_scoring.py)
+    #: - recorded for later recalibration, never itself the v1 gate. Null for
+    #: every non-auto-approved cycle.
+    auto_approval_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scholarship: Mapped[Scholarship] = relationship(back_populates="cycles")
 
 
@@ -299,6 +309,13 @@ class Discovery(TimestampMixin, Base):
         ForeignKey("discoveries.discovery_id"), nullable=True
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Set once `auto_approve_sweep` has evaluated this discovery, pass or
+    #: fail - a single evaluation, ever, not a periodic re-check. Prevents
+    #: re-fetching the real page and re-running the AI Router every hour for
+    #: a candidate that already failed the gate once.
+    auto_review_evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     __table_args__ = (UniqueConstraint("source_page_id", "content_hash"),)
 
 
@@ -565,6 +582,37 @@ class AuditLog(TimestampMixin, Base):
     action: Mapped[str] = mapped_column(String(100))
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Structured detail for an entry a human may need to audit later (which
+    #: checks passed and their actual values, not just that they passed) -
+    #: nullable so every pre-existing audit_log row stays valid untouched.
+    context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class AutoApprovalAudit(TimestampMixin, Base):
+    """One auto-approved cycle's sampling-audit record - the feedback loop
+    `docs/candidate-verification-standard.md` calls for before ever trusting
+    this pathway further. Kept separate from ReviewTask (whose state/resolution
+    vocabulary is content-fixing approve/reject semantics, not "was this
+    earlier automated decision correct") and from AuditLog (a generic,
+    append-only log - this instead has its own resolvable lifecycle a human
+    spot-check moves through)."""
+
+    __tablename__ = "auto_approval_audits"
+    __table_args__ = (UniqueConstraint("cycle_id"),)
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    scholarship_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scholarships.scholarship_id"))
+    cycle_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scholarship_cycles.cycle_id"))
+    #: The full corroboration/verification/sanity-check detail at decision
+    #: time - everything a human spot-checking this later needs to see, not
+    #: just the score.
+    decision_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    sampled: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome: Mapped[str] = mapped_column(String(30), default="pending")
+    reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class MatchExplanation(TimestampMixin, Base):

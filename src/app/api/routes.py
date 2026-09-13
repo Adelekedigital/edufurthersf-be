@@ -13,6 +13,11 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.auto_approval_schemas import (
+    AutoApprovalAuditListResponse,
+    AutoApprovalAuditRead,
+    ResolveAutoApprovalAuditRequest,
+)
 from app.api.detail_schemas import MatchProfileRequest, ScholarshipDetailResponse
 from app.api.ingestion_schemas import FeedImportRequest, FeedImportResponse
 from app.api.job_schemas import JobRequest, JobResponse
@@ -56,6 +61,7 @@ from app.domain.facts import derive_facts as _derive_facts
 from app.domain.jobs import JobState
 from app.domain.matching import MatchDecision, SearchProfile, evaluate_match
 from app.domain.models import (
+    AutoApprovalAudit,
     Discovery,
     JoinRequest,
     Provider,
@@ -261,6 +267,8 @@ def _cycle_admin_read(cycle: ScholarshipCycle, evaluated_at: datetime) -> Schola
         status_valid_until=cycle.status_valid_until,
         last_verified_at=cycle.last_verified_at,
         facts=facts,
+        is_auto_approved=cycle.is_auto_approved,
+        auto_approval_score=cycle.auto_approval_score,
     )
 
 
@@ -397,6 +405,11 @@ RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot", "harvest_tavily", "sync_
 #: sweep_due_jobs joins refresh_status/reverify_due here so a job sitting in
 #: retry_wait actually gets retried automatically once its backoff elapses.
 RECURRING_QUARTER_HOUR_KINDS = frozenset({"refresh_status", "reverify_due", "sweep_due_jobs"})
+#: auto_approve_sweep does real per-candidate I/O (a page fetch plus up to
+#: two AI Router calls), unlike the cheap DB-only quarter-hour sweeps above -
+#: a slower, purpose-built cadence keeps it from overlapping itself or
+#: competing with those for the same shared per-minute job-claim throughput.
+RECURRING_HOURLY_KINDS = frozenset({"auto_approve_sweep"})
 
 
 def _weekly_dedupe_key(kind: str) -> str:
@@ -407,6 +420,11 @@ def _weekly_dedupe_key(kind: str) -> str:
 def _quarter_hour_dedupe_key(kind: str) -> str:
     now = datetime.now(UTC)
     bucket = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    return f"{kind}:{bucket.isoformat()}"
+
+
+def _hourly_dedupe_key(kind: str) -> str:
+    bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     return f"{kind}:{bucket.isoformat()}"
 
 
@@ -443,6 +461,8 @@ async def _enqueue(kind: str, job_request: JobRequest, db: AsyncSession) -> JobR
             dedupe_key = _weekly_dedupe_key(kind)
         elif kind in RECURRING_QUARTER_HOUR_KINDS:
             dedupe_key = _quarter_hour_dedupe_key(kind)
+        elif kind in RECURRING_HOURLY_KINDS:
+            dedupe_key = _hourly_dedupe_key(kind)
     job, created = await enqueue_job(db, kind, dedupe_key, job_request.payload)
     now = datetime.now(UTC)
     eligible = job.state in (JobState.queued.value, JobState.retry_wait.value) and (
@@ -577,6 +597,10 @@ def _search_result(
     caveats = list(decision.caveats)
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
+    if row.is_auto_approved:
+        caveats.append(
+            "This record was verified through automated evidence review, not direct human review."
+        )
     return SearchResult(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
@@ -672,6 +696,94 @@ async def review_queue(
             for task, raw_title, raw_excerpt, extracted_facts, source_url in rows
         ],
         open_count=int(open_count or 0),
+    )
+
+
+@router.get(
+    "/internal/admin/auto-approvals/audits",
+    response_model=AutoApprovalAuditListResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def auto_approval_audits(
+    sampled: bool | None = Query(default=None),
+    outcome: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> AutoApprovalAuditListResponse:
+    """The sampling-audit worklist `auto_approve_sweep` populates - the
+    human feedback loop the verification standard calls for before this
+    pathway is ever trusted further."""
+    query = select(AutoApprovalAudit, Scholarship.name).join(
+        Scholarship, Scholarship.scholarship_id == AutoApprovalAudit.scholarship_id
+    )
+    count_query = select(func.count()).select_from(AutoApprovalAudit)
+    if sampled is not None:
+        query = query.where(AutoApprovalAudit.sampled == sampled)
+        count_query = count_query.where(AutoApprovalAudit.sampled == sampled)
+    if outcome is not None:
+        query = query.where(AutoApprovalAudit.outcome == outcome)
+        count_query = count_query.where(AutoApprovalAudit.outcome == outcome)
+    rows = list(
+        await db.execute(query.order_by(AutoApprovalAudit.created_at).offset(offset).limit(limit))
+    )
+    total = await db.scalar(count_query)
+    return AutoApprovalAuditListResponse(
+        data=[
+            AutoApprovalAuditRead(
+                audit_id=audit.audit_id,
+                scholarship_id=audit.scholarship_id,
+                cycle_id=audit.cycle_id,
+                scholarship_name=name,
+                sampled=audit.sampled,
+                outcome=audit.outcome,
+                decision_snapshot=audit.decision_snapshot,
+                reviewer_notes=audit.reviewer_notes,
+                resolved_at=audit.resolved_at,
+                resolved_by=audit.resolved_by,
+                created_at=audit.created_at,
+            )
+            for audit, name in rows
+        ],
+        total=int(total or 0),
+    )
+
+
+@router.post(
+    "/internal/admin/auto-approvals/audits/{audit_id}/resolve",
+    response_model=AutoApprovalAuditRead,
+    dependencies=[Depends(require_internal_service)],
+)
+async def resolve_auto_approval_audit(
+    audit_id: uuid.UUID,
+    payload: ResolveAutoApprovalAuditRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AutoApprovalAuditRead:
+    audit = await db.scalar(
+        select(AutoApprovalAudit).where(AutoApprovalAudit.audit_id == audit_id).with_for_update()
+    )
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    audit.outcome = payload.outcome
+    audit.reviewer_notes = payload.reviewer_notes
+    audit.resolved_at = datetime.now(UTC)
+    audit.resolved_by = payload.resolved_by
+    await db.commit()
+    scholarship_name = await db.scalar(
+        select(Scholarship.name).where(Scholarship.scholarship_id == audit.scholarship_id)
+    )
+    return AutoApprovalAuditRead(
+        audit_id=audit.audit_id,
+        scholarship_id=audit.scholarship_id,
+        cycle_id=audit.cycle_id,
+        scholarship_name=scholarship_name or "",
+        sampled=audit.sampled,
+        outcome=audit.outcome,
+        decision_snapshot=audit.decision_snapshot,
+        reviewer_notes=audit.reviewer_notes,
+        resolved_at=audit.resolved_at,
+        resolved_by=audit.resolved_by,
+        created_at=audit.created_at,
     )
 
 
@@ -827,6 +939,10 @@ def _detail(row: ScholarshipCycle) -> ScholarshipDetailResponse:
     caveats: list[str] = []
     if status != row.public_status:
         caveats.append("Current status evidence requires re-verification.")
+    if row.is_auto_approved:
+        caveats.append(
+            "This record was verified through automated evidence review, not direct human review."
+        )
     return ScholarshipDetailResponse(
         scholarship_id=row.scholarship_id,
         cycle_id=row.cycle_id,
