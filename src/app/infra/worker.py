@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
@@ -32,6 +32,7 @@ from app.domain.parsebot_harvest import (
 )
 from app.domain.review_draft import draft_review_recommendation
 from app.domain.tavily_harvest import TAVILY_SOURCE_NAME, tavily_result_to_record
+from app.infra.auto_approval import attempt_auto_approval
 from app.infra.candidate_extraction import extract_and_store_facts
 from app.infra.core_catalogue import CoreCatalogueClient
 from app.infra.countries import load_vocabulary, sync_countries
@@ -93,6 +94,8 @@ async def execute_job(db: AsyncSession, job_id: uuid.UUID) -> str:
             await refresh_due_statuses(db)
         elif job.kind == "reverify_due":
             await reverify_due_cycles(db)
+        elif job.kind == "auto_approve_sweep":
+            await _auto_approve_sweep(db)
         else:
             # Unimplemented kinds remain durable and visible rather than being
             # acknowledged as successful no-ops.
@@ -206,6 +209,49 @@ async def _prepare_review(db: AsyncSession, payload: dict) -> None:
         country_names=vocabulary.names,
     )
     await db.commit()
+
+
+async def _auto_approve_sweep(db: AsyncSession) -> dict[str, int]:
+    """Evaluate a batch of old-enough, not-yet-evaluated open review tasks
+    for auto-approval. A no-op unless explicitly turned on per environment -
+    see `Settings.auto_approve_enabled`.
+    """
+    settings = get_settings()
+    if not settings.auto_approve_enabled:
+        return {"evaluated": 0, "approved": 0}
+
+    cutoff = datetime.now(UTC) - timedelta(hours=settings.auto_approve_min_age_hours)
+    candidate_ids = list(
+        await db.scalars(
+            select(ReviewTask.review_task_id)
+            .join(Discovery, Discovery.discovery_id == ReviewTask.discovery_id)
+            .where(
+                ReviewTask.state == "open",
+                ReviewTask.discovery_id.is_not(None),
+                Discovery.auto_review_evaluated_at.is_(None),
+                Discovery.created_at <= cutoff,
+            )
+            .order_by(ReviewTask.created_at)
+            .limit(settings.auto_approve_sweep_batch_limit)
+        )
+    )
+    evaluated = approved = 0
+    for review_task_id in candidate_ids:
+        evaluated += 1
+        try:
+            outcome = await attempt_auto_approval(db, review_task_id)
+        except Exception:
+            # One bad candidate must not abort the batch, and must not leave
+            # the session's transaction aborted for the next iteration - same
+            # pattern as reverify_due_cycles's per-cycle isolation.
+            logger.exception(
+                "auto_approve_sweep_item_failed", extra={"review_task_id": str(review_task_id)}
+            )
+            await db.rollback()
+            continue
+        if outcome.approved:
+            approved += 1
+    return {"evaluated": evaluated, "approved": approved}
 
 
 def _map_and_append(

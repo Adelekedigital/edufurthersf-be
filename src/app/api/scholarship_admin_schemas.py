@@ -19,6 +19,10 @@ class ScholarshipCycleAdminRead(BaseModel):
     status_valid_until: datetime | None = None
     last_verified_at: datetime | None = None
     facts: dict[str, Any]
+    #: True only for a cycle auto_approve_sweep published unsupervised - the
+    #: visible distinction an auto-approved record must always carry.
+    is_auto_approved: bool = False
+    auto_approval_score: int | None = None
 
 
 class ScholarshipAdminRead(BaseModel):

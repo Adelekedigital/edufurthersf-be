@@ -25,7 +25,7 @@ from app.domain.countries import SUPPORTED_DESTINATIONS
 DRAFT_VERSION = "prepare_review-v1"
 
 
-def _mentioned_countries(text: str, country_names: dict[str, str]) -> tuple[list[str], list[str]]:
+def mentioned_countries(text: str, country_names: dict[str, str]) -> tuple[list[str], list[str]]:
     """Country codes named in `text`, split into supported vs. other.
 
     Matched against the mirrored country vocabulary, never a hand-typed list,
@@ -59,7 +59,7 @@ def draft_review_recommendation(
     standard prohibits.
     """
     text = " ".join(part for part in (raw_title, raw_excerpt) if part)
-    supported, other = _mentioned_countries(text, country_names)
+    supported, other = mentioned_countries(text, country_names)
 
     if other and not supported:
         named = ", ".join(country_names[code] for code in other)

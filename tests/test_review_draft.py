@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.domain.review_draft import DRAFT_VERSION, _mentioned_countries, draft_review_recommendation
+from app.domain.review_draft import DRAFT_VERSION, draft_review_recommendation, mentioned_countries
 
 COUNTRY_NAMES = {
     "NG": "Nigeria",
@@ -87,7 +87,7 @@ def test_word_boundary_avoids_a_substring_collision() -> None:
     """"Niger" must not fire inside "Nigeria" - the same shape of name
     collision caught by hand this session (Hamad Bin Khalifa vs Khalifa
     University)."""
-    supported, other = _mentioned_countries(
+    supported, other = mentioned_countries(
         "University of Lagos, Nigeria", {**COUNTRY_NAMES, "NE": "Niger"}
     )
     assert supported == []

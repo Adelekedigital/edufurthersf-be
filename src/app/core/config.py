@@ -105,6 +105,23 @@ class Settings(BaseSettings):
     jina_api_key: str | None = None
     jina_monthly_call_limit: int = 500
 
+    # Auto-approve for high-confidence candidates (docs/candidate-verification-standard.md,
+    # "Future automation" item 5) - off everywhere until explicitly turned on
+    # per environment, once the code has run and been observed. Every other
+    # field here only has an effect once this is true.
+    auto_approve_enabled: bool = False
+    #: How long a discovery must sit before its first (and only) automated
+    #: evaluation - long enough for a duplicate from another source to
+    #: plausibly have arrived, since corroboration is meaningless before that.
+    auto_approve_min_age_hours: int = 24
+    auto_approve_min_corroboration_sources: int = 2
+    auto_approve_require_real_page_verification: bool = True
+    #: Fraction of auto-approvals routed to a human spot-check, tracked via
+    #: AutoApprovalAudit - the feedback loop the standard calls for before
+    #: ever loosening this pathway further.
+    auto_approve_sample_rate: float = 0.20
+    auto_approve_sweep_batch_limit: int = 50
+
     @field_validator("database_url")
     @classmethod
     def use_async_database_driver(cls, value: str) -> str:
