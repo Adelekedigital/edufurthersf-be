@@ -97,6 +97,14 @@ parse-apis = { path = "parse_apis", editable = true }
 # Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
 # Edit `apis` to curate which of your account APIs this repo syncs;
 # an absent `apis` key means all of them.
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
+
+# Managed by the parse CLI (`parse add` / `parse remove` / `parse sync`).
+# Edit `apis` to curate which of your account APIs this repo syncs;
+# an absent `apis` key means all of them.
 [tool.parse]
 
 [[tool.parse.marketplace]]
@@ -140,3 +148,10 @@ slug = "careeronestop_org_api"
 version = 1
 listing_id = "41d1f415-3538-40f9-8e51-bcd8ac968648"
 source_url = "https://www.careeronestop.org/Toolkit/Training/find-scholarships.aspx"
+
+[[tool.parse.marketplace]]
+scraper_id = "0a73de7e-3ca4-4503-abb8-d25b83995be5"
+slug = "usnews_com_api"
+version = 1
+listing_id = "003c1361-198f-4529-abfc-e3356d806171"
+source_url = "https://www.usnews.com/education/scholarships/search"

@@ -4,7 +4,7 @@ Source: https://api.parse.bot
 API:    careeronestop.org API (careeronestop_org_api)
 ID:     00e357bc-4084-4a64-8666-7e753b59ce13
 Engine: parse_sdk 0.2.0
-Generated at: 2026-09-12T14:28:52.694143+00:00
+Generated at: 2026-09-13T01:55:03.758855+00:00
 """
 
 from __future__ import annotations
