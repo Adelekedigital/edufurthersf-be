@@ -14,8 +14,11 @@ from typing import Any
 
 EXTRACTION_VERSION = "extract-v1"
 
-_CURRENCY_AMOUNT = re.compile(r"[£$€]\s?[\d][\d,]*(?:\.\d+)?")
-_MONTH_NAME_DATE = re.compile(
+#: Shared with `infra/candidate_extraction.py`'s real-page windowing - the
+#: same substrings worth extracting here are the ones worth showing the AI
+#: Router when a full page (not just a short excerpt) is the input.
+CURRENCY_AMOUNT_PATTERN = re.compile(r"[£$€]\s?[\d][\d,]*(?:\.\d+)?")
+MONTH_NAME_DATE_PATTERN = re.compile(
     r"\b(?:January|February|March|April|May|June|July|August|September|October|November|"
     r"December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
     re.IGNORECASE,
@@ -45,8 +48,8 @@ def extract_candidate_facts(raw_title: str | None, raw_excerpt: str | None) -> d
     text = " ".join(part for part in (raw_title, raw_excerpt) if part)
     lowered = text.lower()
 
-    funding_mentions = _CURRENCY_AMOUNT.findall(text)
-    deadline_mentions = _MONTH_NAME_DATE.findall(text)
+    funding_mentions = CURRENCY_AMOUNT_PATTERN.findall(text)
+    deadline_mentions = MONTH_NAME_DATE_PATTERN.findall(text)
 
     levels = sorted(
         level
