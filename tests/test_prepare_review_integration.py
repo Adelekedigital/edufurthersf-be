@@ -116,12 +116,15 @@ async def test_prepare_review_drafts_ambiguous_when_destination_is_unclear(db) -
 
 
 async def test_prepare_review_carries_extracted_facts_into_the_draft(db) -> None:
+    """`link_discovery` now runs real extraction inline (see linking.py) for
+    every new_candidate/needs_review outcome, so this exercises the actual
+    pipeline rather than a hand-set stand-in for what extraction would have
+    produced."""
     discovery = await _discover(
         db, title="Award E", excerpt="A £10,000 award for a Master's student.", slug="e"
     )
-    discovery.extracted_facts = {"funding_mentions": ["£10,000"], "level_mentions": ["masters"]}
-    await db.commit()
     await link_discovery(db, discovery.discovery_id)
+    await db.refresh(discovery)
     task = await db.scalar(
         select(ReviewTask).where(ReviewTask.discovery_id == discovery.discovery_id)
     )
@@ -134,7 +137,6 @@ async def test_prepare_review_carries_extracted_facts_into_the_draft(db) -> None
     await execute_job(db, job.job_id)
 
     await db.refresh(task)
-    assert task.draft_recommendation["proposed_facts"] == {
-        "funding_mentions": ["£10,000"],
-        "level_mentions": ["masters"],
-    }
+    assert task.draft_recommendation["proposed_facts"] == discovery.extracted_facts
+    assert discovery.extracted_facts["funding_mentions"] == ["£10,000"]
+    assert discovery.extracted_facts["level_mentions"] == ["masters"]

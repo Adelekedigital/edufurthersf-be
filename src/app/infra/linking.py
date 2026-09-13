@@ -5,7 +5,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.linking import LinkOutcome, decide_link
-from app.domain.models import Discovery, ReviewTask, Scholarship
+from app.domain.models import Discovery, ReviewTask, Scholarship, Source, SourcePage
+from app.domain.review_priority import compute_review_priority
+from app.infra.candidate_extraction import extract_and_store_facts
 from app.infra.jobs import enqueue_job
 
 
@@ -52,22 +54,40 @@ async def link_discovery(db: AsyncSession, discovery_id: uuid.UUID) -> LinkOutco
     if decision.outcome == LinkOutcome.linked:
         discovery.canonical_scholarship_id = uuid.UUID(decision.scholarship_id)
         discovery.processing_state = LinkOutcome.linked.value
-    elif decision.outcome == LinkOutcome.needs_review:
-        discovery.processing_state = LinkOutcome.needs_review.value
-        await _add_review_task_once(db, discovery.discovery_id, decision.reason, priority=50)
     else:
-        # A brand-new identity is still a decision a reviewer must make before
-        # it can ever be published. Against an empty or young catalogue this is
-        # the outcome nearly every discovery gets, so without a task here it
-        # would sit invisible - new_candidate has no other path into the queue.
-        discovery.processing_state = LinkOutcome.new_candidate.value
-        await _add_review_task_once(db, discovery.discovery_id, decision.reason)
+        # Extraction only runs for outcomes that actually open a ReviewTask -
+        # `linked` (resolved above) and `duplicate_pending` (resolved earlier)
+        # never surface facts to a reviewer, so extracting for them would
+        # spend a real AI Router call nobody will ever look at.
+        await extract_and_store_facts(discovery)
+        authority_grade = await db.scalar(
+            select(Source.authority_grade)
+            .join(SourcePage, SourcePage.source_id == Source.source_id)
+            .where(SourcePage.page_id == discovery.source_page_id)
+        )
+        needs_review = decision.outcome == LinkOutcome.needs_review
+        priority = compute_review_priority(
+            needs_review=needs_review,
+            extracted_facts=discovery.extracted_facts,
+            ai_extracted_facts=discovery.ai_extracted_facts,
+            authority_grade=authority_grade,
+        )
+        if needs_review:
+            discovery.processing_state = LinkOutcome.needs_review.value
+        else:
+            # A brand-new identity is still a decision a reviewer must make
+            # before it can ever be published. Against an empty or young
+            # catalogue this is the outcome nearly every discovery gets, so
+            # without a task here it would sit invisible - new_candidate has
+            # no other path into the queue.
+            discovery.processing_state = LinkOutcome.new_candidate.value
+        await _add_review_task_once(db, discovery.discovery_id, decision.reason, priority=priority)
     await db.commit()
     return decision.outcome
 
 
 async def _add_review_task_once(
-    db: AsyncSession, discovery_id: uuid.UUID, reason: str, *, priority: int = 100
+    db: AsyncSession, discovery_id: uuid.UUID, reason: str, *, priority: int
 ) -> None:
     """Keep repeated deliveries from multiplying one discovery's queue task.
 

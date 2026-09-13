@@ -10,7 +10,7 @@ import httpx
 
 from app.domain.ai_router import AIRouterOutcome, AIRouterResponse
 from app.domain.models import Discovery, Source, SourcePage
-from app.infra import worker as worker_module
+from app.infra import candidate_extraction as candidate_extraction_module
 from app.infra.jobs import enqueue_job
 from app.infra.worker import execute_job
 from tests.conftest import requires_db
@@ -76,7 +76,7 @@ async def test_extract_candidate_populates_the_discoverys_extracted_facts(db) ->
 
 async def test_ai_router_unconfigured_leaves_ai_extracted_facts_null(db, monkeypatch) -> None:
     monkeypatch.setattr(
-        worker_module,
+        candidate_extraction_module,
         "get_settings",
         lambda: _FakeSettings(None, None, None),
     )
@@ -94,7 +94,7 @@ async def test_ai_router_unconfigured_leaves_ai_extracted_facts_null(db, monkeyp
 
 async def test_ai_router_completed_outcome_populates_ai_extracted_facts(db, monkeypatch) -> None:
     monkeypatch.setattr(
-        worker_module,
+        candidate_extraction_module,
         "get_settings",
         lambda: _FakeSettings("https://router.test", "fake-pem", "kid-1"),
     )
@@ -108,7 +108,7 @@ async def test_ai_router_completed_outcome_populates_ai_extracted_facts(db, monk
             trace_reference=None,
         )
 
-    monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
+    monkeypatch.setattr(candidate_extraction_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award B", raw_excerpt="details")
     job, _ = await enqueue_job(
         db,
@@ -127,7 +127,7 @@ async def test_ai_router_non_completed_outcome_leaves_ai_extracted_facts_null(
     """review/budget_exhausted/provider_unavailable all mean "no result yet" -
     never something extract_candidate stores as if it were usable output."""
     monkeypatch.setattr(
-        worker_module,
+        candidate_extraction_module,
         "get_settings",
         lambda: _FakeSettings("https://router.test", "fake-pem", "kid-1"),
     )
@@ -141,7 +141,7 @@ async def test_ai_router_non_completed_outcome_leaves_ai_extracted_facts_null(
             trace_reference=None,
         )
 
-    monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
+    monkeypatch.setattr(candidate_extraction_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award C", raw_excerpt="details")
     job, _ = await enqueue_job(
         db,
@@ -159,7 +159,7 @@ async def test_ai_router_transport_failure_does_not_fail_extract_candidate(db, m
     not fail the whole extract_candidate job - the deterministic extraction
     still ran and must still be saved."""
     monkeypatch.setattr(
-        worker_module,
+        candidate_extraction_module,
         "get_settings",
         lambda: _FakeSettings("https://router.test", "fake-pem", "kid-1"),
     )
@@ -167,7 +167,7 @@ async def test_ai_router_transport_failure_does_not_fail_extract_candidate(db, m
     async def _fake_execute(self, request):
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(worker_module.AIRouterClient, "execute", _fake_execute)
+    monkeypatch.setattr(candidate_extraction_module.AIRouterClient, "execute", _fake_execute)
     discovery = await _discovery(db, raw_title="Award D", raw_excerpt="details")
     job, _ = await enqueue_job(
         db,
