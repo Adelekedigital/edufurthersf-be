@@ -75,11 +75,16 @@ async def try_ai_extraction(discovery: Discovery) -> dict | None:
     return response.output
 
 
-async def extract_and_store_facts(discovery: Discovery) -> None:
+async def extract_and_store_facts(discovery: Discovery, *, include_ai: bool = True) -> None:
     """Populate `discovery.extracted_facts`/`ai_extracted_facts` in place.
 
     Never commits itself - composes cleanly inside a larger transaction
     (`link_discovery`) as well as standalone (the `extract_candidate` job).
+
+    `include_ai=False` for `duplicate_pending` discoveries (see
+    `infra/linking.py`): a duplicate never gets its own reviewer, so an AI
+    Router call there would be spent on a result nobody looks at - but the
+    deterministic facts are still worth having, for corroboration.
     """
     discovery.extracted_facts = extract_candidate_facts(discovery.raw_title, discovery.raw_excerpt)
-    discovery.ai_extracted_facts = await try_ai_extraction(discovery)
+    discovery.ai_extracted_facts = await try_ai_extraction(discovery) if include_ai else None
