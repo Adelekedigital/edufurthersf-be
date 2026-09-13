@@ -404,7 +404,13 @@ RECURRING_WEEKLY_KINDS = frozenset({"harvest_parsebot", "harvest_tavily", "sync_
 #: rather than deduping every delivery after the first-ever one forever.
 #: sweep_due_jobs joins refresh_status/reverify_due here so a job sitting in
 #: retry_wait actually gets retried automatically once its backoff elapses.
-RECURRING_QUARTER_HOUR_KINDS = frozenset({"refresh_status", "reverify_due", "sweep_due_jobs"})
+#: reconcile_stuck_jobs joins them too - its own lease window is exactly 15
+#: minutes (LEASE_SECONDS, domain/jobs.py), so a job abandoned by a crashed
+#: worker is caught within about one cycle of actually going stale, and the
+#: sweep is a no-op (cheap, DB-only) whenever nothing is actually stuck.
+RECURRING_QUARTER_HOUR_KINDS = frozenset(
+    {"refresh_status", "reverify_due", "sweep_due_jobs", "reconcile_stuck_jobs"}
+)
 #: auto_approve_sweep does real per-candidate I/O (a page fetch plus up to
 #: two AI Router calls), unlike the cheap DB-only quarter-hour sweeps above -
 #: a slower, purpose-built cadence keeps it from overlapping itself or
