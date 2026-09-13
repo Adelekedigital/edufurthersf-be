@@ -477,3 +477,58 @@ with `turkiyeburslari.gov.tr`) rather than a fully automated Tier-C feed.
 Immediate, low-risk next step either way: register `turkiyeburslari.gov.tr`
 as a direct `Source` now, independent of the larger Tavily connector
 decision.
+
+## Update, 2026-09-13: CareerOneStop (.com) and GradSchools ruled out; US News confirmed with a caveat
+
+Real sample pull against the three remaining unverified Parse.bot
+candidates from the original 16, once the daily rate cap reset.
+
+**CareerOneStop (.com) - ruled out.** `scholarship_summaries.search(keyword="scholarship",
+study_level=GRADUATE, ...)` returned 5 real-looking results, but 4 of the
+5 `.details()` calls failed with `UpstreamError (HTTP 502)`, and a second
+search (`keyword="engineering"`) failed outright the same way. This is the
+same underlying CareerOneStop data `.org` already covers (already
+confirmed and synced) - `.com` is a meaningfully less reliable wrapper
+around the same source, not a distinct one. Not worth adding a flakier
+duplicate of data already sourced. Removed from sync.
+
+**GradSchools - ruled out, conclusively.** `program_listings.search(degree_level=MASTERS,
+subject="engineering", ...)` returns real program listings, but every
+result's fields are a program/tuition directory shape, not a scholarship
+one: `all attrs: ['degree', 'program_name', 'school_name', 'url']` - no
+funding field exists on the resource type at all. Worse, a browse-all
+query surfaced clearly mismapped data (a `program_name` field holding a
+raw enrollment count like `'28,040'`, a `school_name` field holding a raw
+tuition figure like `'$158,910'`) - this is a school-statistics directory,
+not scholarship data, confirming what an earlier partial check already
+suspected. Removed from sync.
+
+**US News - confirmed real, with a real structural caveat.** `scholarships.search(keyword="graduate",
+...)` returned 8 real, named, individually verifiable programs with real
+funding amounts and deadlines (Army ROTC Scholarship - full tuition;
+Costas Sivyllis ALPA Education Scholarship - $15,000; Gail Clay Scholarship
+- $8,800). The caveat: **this API has no structured degree-level filter at
+all** - confirmed from its own generated client, `search()` only exposes a
+free-text `keyword` param, no `study_level`/`degree_level` equivalent the
+way ScholarshipPortal/CareerOneStop/GradSchools all have. `keyword="graduate"`
+is a loose text match, not a level filter, and it shows: several hits
+(NJ Stars II Scholarship Match - a community-college transfer incentive;
+Visit Experience Scholarship - a campus-visit incentive) are clearly
+undergraduate-shaped despite matching the keyword. This is a real source
+with real funding data, but the highest reviewer-noise ratio of any source
+confirmed so far - worse than Fastweb's own already-documented skew, since
+Fastweb at least has `by_major`/`by_state` as a partial discriminator and
+US News has nothing beyond keyword luck. Synced; a harvest connector would
+need to lean entirely on the existing review queue to catch level
+mismatches, with no cheaper pre-filter available.
+
+**Net**: 5 of the original 16 candidates now confirmed-and-actionable
+(Mastersportal, Opportunity Desk, Fastweb, CareerOneStop .org, US News)
+alongside the 2 original sources - all but US News now have connectors
+built and live (PR #53); US News's connector is queued as follow-up, same
+as every other confirmed-but-unbuilt source before it. 5 of 16 confirmed
+wrong fits and removed (PhDportal, YÖK Atlas, BigFuture, CareerOneStop
+.com, GradSchools). Remaining never-verified candidates from the original
+16: UCAS, TopUniversities, Times Higher Education, Hotcourses Abroad -
+not pursued this round; Scholarships.com was superseded earlier by
+Mastersportal's stronger confirmed fit.

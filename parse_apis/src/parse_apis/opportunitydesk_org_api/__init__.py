@@ -4,7 +4,7 @@ Source: https://api.parse.bot
 API:    opportunitydesk.org API (opportunitydesk_org_api)
 ID:     b5531142-2817-47a6-8a5a-c9b0f6954a30
 Engine: parse_sdk 0.2.0
-Generated at: 2026-09-12T14:28:52.677476+00:00
+Generated at: 2026-09-13T01:55:03.741926+00:00
 """
 
 from __future__ import annotations
