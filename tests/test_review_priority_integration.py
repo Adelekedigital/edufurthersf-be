@@ -152,14 +152,36 @@ async def test_linked_outcome_never_triggers_extraction(db) -> None:
     assert discovery.extracted_facts is None
 
 
-async def test_duplicate_pending_outcome_never_triggers_extraction(db) -> None:
+async def test_duplicate_pending_outcome_gets_deterministic_facts_but_never_an_ai_call(
+    db,
+) -> None:
+    """A duplicate never gets its own reviewer, so an AI Router call on it
+    would be spent on a result nobody looks at - but the deterministic facts
+    are still populated, so a later corroboration check has something to
+    compare against the original discovery's own claims."""
     first_source = await _source(db, name="ScholarshipRegion")
     second_source = await _source(db, name="Tavily Web Search")
     await import_feed_records(
-        db, [_record(first_source.source_id, "https://example.test/a", "Award A", "")]
+        db,
+        [
+            _record(
+                first_source.source_id,
+                "https://example.test/a",
+                "Award A",
+                "Offers a £13,000 grant.",
+            )
+        ],
     )
     await import_feed_records(
-        db, [_record(second_source.source_id, "https://example.test/a2", "Award A", "")]
+        db,
+        [
+            _record(
+                second_source.source_id,
+                "https://example.test/a2",
+                "Award A",
+                "Offers a £13,000 grant.",
+            )
+        ],
     )
     discoveries = list(await db.scalars(select(Discovery).order_by(Discovery.created_at)))
     first, second = discoveries
@@ -168,4 +190,8 @@ async def test_duplicate_pending_outcome_never_triggers_extraction(db) -> None:
     assert await link_discovery(db, second.discovery_id) == LinkOutcome.duplicate_pending
 
     await db.refresh(second)
-    assert second.extracted_facts is None
+    assert second.extracted_facts is not None
+    assert second.extracted_facts["funding_mentions"] == ["£13,000"]
+    # No AI Router configured in tests by default, but this must be None
+    # regardless - include_ai=False is unconditional for duplicates.
+    assert second.ai_extracted_facts is None

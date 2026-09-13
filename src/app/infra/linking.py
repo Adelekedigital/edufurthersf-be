@@ -44,6 +44,11 @@ async def link_discovery(db: AsyncSession, discovery_id: uuid.UUID) -> LinkOutco
         if original_id is not None:
             discovery.duplicate_of_discovery_id = original_id
             discovery.processing_state = LinkOutcome.duplicate_pending.value
+            # Deterministic-only: nobody reviews a duplicate on its own, so an
+            # AI Router call here would be spent on a result nobody looks at -
+            # but the facts are still worth having for cross-source
+            # corroboration of whichever discovery a reviewer does see.
+            await extract_and_store_facts(discovery, include_ai=False)
             await db.commit()
             return LinkOutcome.duplicate_pending
 
