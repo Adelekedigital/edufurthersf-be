@@ -206,3 +206,62 @@ materially eroded since 2023, and its PhD funding is structurally the same
 non-scholarship shape as Finland's already-documented gap. Sweden is real
 but narrow (masters-only, restricted-country, work-experience-gated) with
 the same Nordic employment-based PhD pattern.
+
+## Update, 2026-09-12: Tier-C connector coverage verified for all 6
+
+Before adding any of the six confirmed codes (`JP`, `KR`, `CN`, `FR`, `SA`,
+`NZ`) to `SUPPORTED_DESTINATIONS`, ran real sample pulls against
+ScholarshipPortal, Mastersportal, and PhDScanner's own `country`/`country_iso`/
+`destination_country` filters for each - these APIs accept any code
+independent of Finder's own supported set, so this is checkable before
+committing, the same discipline every other destination/source addition
+this session has followed.
+
+**Real signal confirmed for all 6** via Mastersportal/ScholarshipPortal,
+though with a genuine data-quality caveat: two scholarships ("Mary Doctor
+Fine Arts Scholarship," "Fulbright U.S. Student Program") appeared in the
+top results for *every single* destination queried, including ones with no
+obvious connection - the same cross-country leakage this project's original
+Parse.bot research already documented for ScholarshipPortal, now confirmed
+to affect these new destinations too, not a one-off. Reviewers will need to
+screen these the same way as any other Tier-C noise.
+
+Filtering that noise out, genuine country-specific hits turned up for every
+candidate, and encouragingly, several **independently corroborate the exact
+flagship programs already identified above**, not just generic volume:
+
+- **China**: "Chinese Government Scholarship - Type A - Bilateral Program"
+  (Beijing Normal University) - the same CSC program named as the
+  recommended addition.
+- **Saudi Arabia**: "IDB-KAUST Joint PhD Scholarship Program" (KAUST) - the
+  same institution named as the strongest Saudi candidate.
+- **Japan**: "ADB-Japan Scholarship Program for Developing Countries in Asia
+  and Pacific" (ADB/Japan Government) - real, Japan-specific, though a
+  different (bank-administered) program from MEXT.
+- **South Korea**: "Admission Scholarship - Kyung Hee University" - real,
+  institution-level, distinct from GKS.
+- **France**: "AlUla Scholarship Program" (Campus France) - real,
+  France-administered.
+- **New Zealand**: real hits, including a China Scholarship Council award
+  *at* a New Zealand university (University of Waikato) - a reminder that
+  "scholarship for country X" sometimes means funding to study *in* X from
+  a *different* country's government, not an NZ-national program.
+
+PhDScanner returned real, verifiable postings for **France** (Inria, Paris
+Saclay University) and **New Zealand** (University of Waikato) specifically
+- genuine funded PhD opportunities, not just directory noise. **Japan,
+South Korea, China, and Saudi Arabia returned zero PhDScanner results** -
+a real gap for this API today, not an error (confirmed by a clean 0-result
+response, not a failure) - consistent with PhDScanner's already-documented
+GB/DE/FI-strong, CA/US-empty unevenness for the original five destinations.
+
+**Net**: no destination is disqualified by this pass - every one has at
+least some real Tier-C breadth from existing connectors with zero new code,
+on top of the Tier-A flagship program each already has independently.
+Saudi Arabia and China's Mastersportal hits are a genuine second, unrelated
+confirmation of this document's own top picks. `_PHDSCANNER_COUNTRY_NAMES`
+(`parsebot_client.py`) is being extended to cover all 6 (plus backfilling
+the pre-existing gap for `AU`/`TR`, added in earlier sessions but never
+added to this dict) so PhDScanner keeps getting queried for them even
+though today's pull came back empty for four of the six - a real gap now
+doesn't mean a permanent one.
