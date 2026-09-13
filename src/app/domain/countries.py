@@ -12,8 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 #: Destinations the index covers. Owned here rather than mirrored from Core:
-#: it records verified coverage, not a fact about the country.
-SUPPORTED_DESTINATIONS = frozenset({"CA", "GB", "US", "DE", "FI", "AU", "TR"})
+#: it records verified coverage, not a fact about the country. Adding a code
+#: here only takes effect in a deployed environment once sync_countries runs
+#: again - see infra/countries.py's _upsert, which ORs this into an
+#: already-existing Country row's is_supported_destination rather than
+#: leaving it at whatever was true on first insert forever.
+SUPPORTED_DESTINATIONS = frozenset(
+    {"CA", "GB", "US", "DE", "FI", "AU", "TR", "JP", "KR", "CN", "FR", "SA", "NZ"}
+)
 
 #: Stands in until the mirror is populated, so a fresh environment can still
 #: answer searches. Not the authoritative list — Core's catalogue is.
@@ -26,6 +32,12 @@ SEED_COUNTRIES: dict[str, str] = {
     "FI": "Finland",
     "AU": "Australia",
     "TR": "Turkiye",
+    "JP": "Japan",
+    "KR": "South Korea",
+    "CN": "China",
+    "FR": "France",
+    "SA": "Saudi Arabia",
+    "NZ": "New Zealand",
 }
 
 

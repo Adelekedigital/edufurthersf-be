@@ -37,6 +37,19 @@ _PHDSCANNER_COUNTRY_NAMES = {
     "US": "United States",
     "DE": "Germany",
     "FI": "Finland",
+    # AU/TR were added to SUPPORTED_DESTINATIONS in earlier sessions but
+    # never backfilled here - PhDScanner was never actually queried for
+    # them until now. Real zero results for Turkiye today (verified
+    # 2026-09-12, both "Turkey" and "Turkiye" accepted, neither errors) -
+    # not a permanent gap, just nothing currently listed.
+    "AU": "Australia",
+    "TR": "Turkiye",
+    "JP": "Japan",
+    "KR": "South Korea",
+    "CN": "China",
+    "FR": "France",
+    "SA": "Saudi Arabia",
+    "NZ": "New Zealand",
 }
 
 
