@@ -193,3 +193,19 @@ async def test_own_facts_with_no_deadline_leave_deadline_agreement_not_applicabl
     verification = await fetch_and_verify_source(db, discovery, source)
 
     assert verification.agreement["deadline_matches"] is None
+
+
+async def test_own_facts_with_no_amount_leave_amount_agreement_not_applicable(
+    db, monkeypatch
+) -> None:
+    """Mirrors the deadline case above - many real scholarships state no
+    figure at all on either side, and that is not the same as disagreeing."""
+    discovery, source = await _discovery(db, extracted_facts={"funding_mentions": []})
+    _stub_jina_success(monkeypatch, content="A fully funded scholarship, deadline March 1, 2027.")
+    _configure_jina(monkeypatch)
+    _stub_domain_approved(monkeypatch)
+    _stub_no_ai_page_extraction(monkeypatch)
+
+    verification = await fetch_and_verify_source(db, discovery, source)
+
+    assert verification.agreement["amount_matches"] is None

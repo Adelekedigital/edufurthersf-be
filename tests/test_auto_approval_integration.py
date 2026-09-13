@@ -314,3 +314,69 @@ async def test_no_deadline_evidence_never_publishes_an_invisible_status_unknown_
 
     assert outcome.approved is False
     assert outcome.reason == "no_deadline_evidence"
+
+
+async def test_no_stated_amount_but_real_cross_source_corroboration_gets_approved(
+    db, monkeypatch
+) -> None:
+    """The actual end-to-end proof of the Phase 2d relaxation: two
+    independent sources agree on the identity and the deadline, neither
+    states a dollar figure, and the real page agrees on the deadline too -
+    corroboration and sanity checks both treat "nothing stated anywhere" as
+    a real substitute for a figure, not a failure."""
+    _configure(monkeypatch)
+    await _provider(db, approved_domains=["ucl.ac.uk"])
+    excerpt_no_amount = (
+        "A fully funded scholarship for Master's students, deadline March 15, 2027."
+    )
+    page_text_no_amount = (
+        "This fully funded scholarship is open to Master's students in the United Kingdom, "
+        "deadline March 15, 2027."
+    )
+
+    async def _fake(db, discovery, source):
+        verification = DiscoveryVerification(
+            discovery_id=discovery.discovery_id,
+            fetched_url="https://ucl.ac.uk/award",
+            fetch_method="jina",
+            page_text=page_text_no_amount,
+            ai_reextracted_facts=None,
+            agreement={"amount_matches": None, "deadline_matches": True},
+        )
+        db.add(verification)
+        await db.commit()
+        return verification
+
+    monkeypatch.setattr(auto_approval_module, "fetch_and_verify_source", _fake)
+
+    first_source = await _source(db, name="ScholarshipRegion")
+    second_source = await _source(db, name="Tavily Web Search")
+    title = "UCL Award"
+    await import_feed_records(
+        db, [_record(first_source.source_id, "https://a.test/x", title, excerpt_no_amount)]
+    )
+    await import_feed_records(
+        db, [_record(second_source.source_id, "https://a.test/y", title, excerpt_no_amount)]
+    )
+    discoveries = list(await db.scalars(select(Discovery).order_by(Discovery.created_at)))
+    original, duplicate = discoveries
+    assert await link_discovery(db, original.discovery_id) == LinkOutcome.new_candidate
+    assert await link_discovery(db, duplicate.discovery_id) == LinkOutcome.duplicate_pending
+    task = await db.scalar(
+        select(ReviewTask).where(ReviewTask.discovery_id == original.discovery_id)
+    )
+    task.draft_recommendation = {"verdict": "ambiguous"}
+    await db.refresh(original)
+    original.created_at = datetime.now(UTC) - timedelta(hours=48)
+    await db.commit()
+    await db.refresh(original)
+    assert original.extracted_facts["funding_mentions"] == []
+
+    outcome = await attempt_auto_approval(db, task.review_task_id)
+
+    assert outcome.approved is True
+    cycle = await db.scalar(
+        select(ScholarshipCycle).where(ScholarshipCycle.cycle_id == outcome.cycle_id)
+    )
+    assert cycle.is_auto_approved is True
+    assert cycle.public_status.value == "open_verified"

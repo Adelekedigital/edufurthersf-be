@@ -106,9 +106,13 @@ def _compare_facts(
     page_amounts = real_page_facts.get("funding_mentions") or []
     page_deadlines = real_page_facts.get("deadline_mentions") or []
 
-    amount_matches = any(amounts_match(a, b) for a in own_amounts for b in page_amounts)
-    # None (not applicable) when the discovery itself asserts no deadline -
-    # same convention as domain/corroboration.py's deadline_corroborated.
+    # None (not applicable) when the discovery itself asserts no amount/deadline -
+    # same convention as domain/corroboration.py's amount_corroborated/deadline_corroborated.
+    amount_matches = (
+        None
+        if not own_amounts
+        else any(amounts_match(a, b) for a in own_amounts for b in page_amounts)
+    )
     deadline_matches = (
         None
         if not own_deadlines
