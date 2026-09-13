@@ -48,6 +48,7 @@ def test_freshness_kinds_are_recurring_quarter_hour_kinds() -> None:
     assert "refresh_status" in RECURRING_QUARTER_HOUR_KINDS
     assert "reverify_due" in RECURRING_QUARTER_HOUR_KINDS
     assert "sweep_due_jobs" in RECURRING_QUARTER_HOUR_KINDS
+    assert "reconcile_stuck_jobs" in RECURRING_QUARTER_HOUR_KINDS
 
 
 def test_quarter_hour_dedupe_key_is_stable_within_the_same_bucket() -> None:

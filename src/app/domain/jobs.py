@@ -19,6 +19,7 @@ RETRYABLE_KINDS = {
     "reverify_due",
     "sweep_due_jobs",
     "auto_approve_sweep",
+    "reconcile_stuck_jobs",
 }
 
 
