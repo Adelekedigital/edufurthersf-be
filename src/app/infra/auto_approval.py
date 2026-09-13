@@ -105,7 +105,7 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
     corroboration = await gather_corroboration(db, discovery)
     if (
         corroboration.independent_source_count < settings.auto_approve_min_corroboration_sources
-        or not corroboration.amount_corroborated
+        or corroboration.amount_corroborated is False
         or corroboration.deadline_corroborated is False
     ):
         return await _defer("insufficient_corroboration")
@@ -120,7 +120,7 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
         return await _defer("verification_failed")
 
     if settings.auto_approve_require_real_page_verification and (
-        not verification.agreement.get("amount_matches")
+        verification.agreement.get("amount_matches") is False
         or verification.agreement.get("deadline_matches") is False
     ):
         return await _defer("page_disagreement")
@@ -148,7 +148,10 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
         return await _defer("no_deadline_evidence")
 
     sanity = run_sanity_checks(
-        extracted_facts=discovery.extracted_facts, deadline_at=derived.deadline_at
+        extracted_facts=discovery.extracted_facts,
+        deadline_at=derived.deadline_at,
+        independent_source_count=corroboration.independent_source_count,
+        min_corroboration_sources=settings.auto_approve_min_corroboration_sources,
     )
     if not sanity.passed:
         return await _defer("sanity_check_failed")
@@ -183,6 +186,7 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
         },
         "sanity_checks": {
             "has_positive_amount": sanity.has_positive_amount,
+            "amount_evidence_sufficient": sanity.amount_evidence_sufficient,
             "deadline_is_future_or_absent": sanity.deadline_is_future_or_absent,
         },
         "derived_facts": {

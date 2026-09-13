@@ -101,5 +101,29 @@ def test_missing_facts_never_raise() -> None:
     result = evaluate_corroboration(
         own_source_id=OWN_SOURCE, own_facts=None, siblings=[(uuid4(), SIBLING_SOURCE, None)]
     )
+    # Nothing on our own side to corroborate - not applicable, not a failure.
+    assert result.amount_corroborated is None
+
+
+def test_amount_corroborated_is_none_when_own_facts_assert_no_amount() -> None:
+    """Many real scholarships are described qualitatively ("fully funded")
+    with no structured figure at all - nothing stated is not the same as
+    stated-and-disagreed."""
+    result = evaluate_corroboration(
+        own_source_id=OWN_SOURCE,
+        own_facts={"funding_mentions": []},
+        siblings=[(uuid4(), SIBLING_SOURCE, {"funding_mentions": ["£13,000"]})],
+    )
+    assert result.amount_corroborated is None
+
+
+def test_amount_corroborated_is_false_when_own_states_one_and_no_sibling_agrees() -> None:
+    """A real, unchanged case: asserting an amount with nothing to back it up
+    still fails - the relaxation only ever applies when nothing is stated."""
+    result = evaluate_corroboration(
+        own_source_id=OWN_SOURCE,
+        own_facts={"funding_mentions": ["£13,000"]},
+        siblings=[(uuid4(), SIBLING_SOURCE, {"funding_mentions": []})],
+    )
     assert result.amount_corroborated is False
     assert result.deadline_corroborated is None

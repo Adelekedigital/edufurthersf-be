@@ -23,10 +23,14 @@ SiblingFact = tuple[UUID, UUID, "dict[str, Any] | None"]
 class CorroborationResult:
     #: Distinct sources (including the subject's own) reporting this identity.
     independent_source_count: int
-    amount_corroborated: bool
-    #: `None` when the subject discovery itself asserts no deadline - nothing
-    #: to corroborate, not a failure. `False` only when it asserts one and no
-    #: sibling agrees.
+    #: `None` when the subject discovery itself asserts no amount - nothing to
+    #: corroborate, not a failure (many real scholarships are described
+    #: qualitatively - "fully funded" - with no structured figure at all; see
+    #: domain/sanity_checks.py for how a real cross-source match can then
+    #: substitute for a stated figure). `False` only when it asserts one and
+    #: no sibling agrees.
+    amount_corroborated: bool | None
+    #: Same `None`-means-not-applicable convention as amount_corroborated.
     deadline_corroborated: bool | None
     corroborating_discovery_ids: list[str] = field(default_factory=list)
 
@@ -42,7 +46,7 @@ def evaluate_corroboration(
 
     distinct_sources = {own_source_id}
     corroborating_ids: list[str] = []
-    amount_corroborated = False
+    amount_corroborated: bool | None = None if not own_amounts else False
     deadline_corroborated: bool | None = None if not own_deadlines else False
 
     for discovery_id, source_id, facts in siblings:
