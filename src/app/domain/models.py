@@ -210,6 +210,29 @@ class SourceSnapshot(Base):
     failure_classification: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
+class DiscoveryVerification(TimestampMixin, Base):
+    """A real fetch of a discovery's own underlying page, kept for human
+    audit. Distinct from SourceSnapshot, which is deliberately
+    change-detection-only (a hash plus byte length, never page text) since
+    its job is `reverify_due`'s drift detection over time - this instead
+    records what an auto-approval decision actually saw, so a human auditing
+    one later doesn't have to take the decision's word for it."""
+
+    __tablename__ = "discovery_verifications"
+    verification_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    discovery_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("discoveries.discovery_id"))
+    fetched_url: Mapped[str] = mapped_column(Text)
+    fetch_method: Mapped[str] = mapped_column(String(20))  # "direct" | "jina"
+    page_text: Mapped[str] = mapped_column(Text)
+    ai_reextracted_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # {"amount_matches": bool, "deadline_matches": bool | None} - None means
+    # the discovery itself asserts no deadline, same "not applicable, not a
+    # failure" convention as domain/corroboration.py's deadline_corroborated.
+    agreement: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
 class ResearchProviderUsage(TimestampMixin, Base):
     """Per-provider, per-calendar-month call counts for external research
     APIs (Tavily, Jina.ai) that have a real free-tier quota to respect.
