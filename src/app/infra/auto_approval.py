@@ -217,7 +217,12 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
     except (LookupError, ValueError) as exc:
         logger.warning("auto_approval_decide_review_failed", extra={"error": str(exc)})
         return AutoApprovalOutcome(approved=False, reason="approve_failed")
-    assert scholarship_id is not None  # decision="approve" always returns one
+    if scholarship_id is None:
+        # decide_review only returns None on decision="reject" - unreachable
+        # for the "approve" request built above, but an assert here would be
+        # stripped under optimized bytecode (bandit B101) for a check worth
+        # keeping either way.
+        raise RuntimeError("decide_review returned no scholarship_id for an approve decision")
 
     countries = await load_vocabulary(db)
     try:
@@ -272,7 +277,9 @@ async def attempt_auto_approval(db: AsyncSession, review_task_id: uuid.UUID) -> 
             context=snapshot,
         )
     )
-    sampled = random.random() < settings.auto_approve_sample_rate
+    # A traffic-sampling decision, not a security control - no cryptographic
+    # guarantee is needed here, just an even spread across auto-approvals.
+    sampled = random.random() < settings.auto_approve_sample_rate  # nosec B311
     db.add(
         AutoApprovalAudit(
             scholarship_id=scholarship_id,
