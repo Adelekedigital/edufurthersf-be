@@ -24,6 +24,20 @@ class SourceCreateRequest(BaseModel):
         return [normalize_domain(domain) for domain in value]
 
 
+class SourceUpdateDomainsRequest(BaseModel):
+    """Replace a Source's approved-domain allowlist entirely - the caller
+    supplies the full desired list, not a delta, so the result is always
+    exactly what was sent rather than depending on whatever was there
+    before."""
+
+    approved_domains: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("approved_domains")
+    @classmethod
+    def normalize_domains(cls, value: list[str]) -> list[str]:
+        return [normalize_domain(domain) for domain in value]
+
+
 class SourceRead(BaseModel):
     source_id: uuid.UUID
     name: str
