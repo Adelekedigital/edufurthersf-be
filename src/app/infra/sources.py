@@ -28,6 +28,27 @@ async def list_sources(db: AsyncSession) -> list[Source]:
     return list(await db.scalars(select(Source).order_by(Source.name)))
 
 
+async def update_source_domains(
+    db: AsyncSession, source_id: uuid.UUID, approved_domains: list[str]
+) -> Source:
+    """Replace a Source's approved-domain allowlist.
+
+    Real-page verification (`infra/source_verification.py`) validates a
+    discovery's actual underlying URL against this list - a Source whose
+    upstream API returns pages on a different domain than originally
+    assumed (confirmed for ScholarshipPortal, whose Parse.bot API actually
+    returns mastersportal.com URLs) needs this corrected here, not worked
+    around downstream.
+    """
+    source = await db.scalar(select(Source).where(Source.source_id == source_id))
+    if source is None:
+        raise LookupError("Source not found")
+    source.approved_domains = approved_domains
+    await db.commit()
+    await db.refresh(source)
+    return source
+
+
 async def deactivate_source(db: AsyncSession, source_id: uuid.UUID) -> Source:
     """Stop a source from being treated as an approved crawl input.
 

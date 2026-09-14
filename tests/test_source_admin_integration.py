@@ -87,3 +87,51 @@ async def test_deactivating_an_unknown_source_is_a_404(client) -> None:
         headers=AUTH,
     )
     assert response.status_code == 404
+
+
+async def test_updating_domains_requires_authentication(client) -> None:
+    created = await client.post("/api/v1/internal/admin/sources", json=VALID_SOURCE, headers=AUTH)
+    source_id = created.json()["source_id"]
+    response = await client.post(
+        f"/api/v1/internal/admin/sources/{source_id}/domains",
+        json={"approved_domains": ["mastersportal.com"]},
+    )
+    assert response.status_code == 401
+
+
+async def test_updating_domains_replaces_the_list_and_is_reflected_when_listed(client) -> None:
+    created = await client.post("/api/v1/internal/admin/sources", json=VALID_SOURCE, headers=AUTH)
+    source_id = created.json()["source_id"]
+
+    response = await client.post(
+        f"/api/v1/internal/admin/sources/{source_id}/domains",
+        json={"approved_domains": ["ScholarshipRegion.com", "Mastersportal.com"]},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    # Normalised the same way create already does: lowercase, no leading dot.
+    assert response.json()["approved_domains"] == ["scholarshipregion.com", "mastersportal.com"]
+
+    listed = await client.get("/api/v1/internal/admin/sources", headers=AUTH)
+    row = next(r for r in listed.json()["data"] if r["source_id"] == source_id)
+    assert row["approved_domains"] == ["scholarshipregion.com", "mastersportal.com"]
+
+
+async def test_updating_domains_requires_at_least_one(client) -> None:
+    created = await client.post("/api/v1/internal/admin/sources", json=VALID_SOURCE, headers=AUTH)
+    source_id = created.json()["source_id"]
+    response = await client.post(
+        f"/api/v1/internal/admin/sources/{source_id}/domains",
+        json={"approved_domains": []},
+        headers=AUTH,
+    )
+    assert response.status_code == 422
+
+
+async def test_updating_domains_for_an_unknown_source_is_a_404(client) -> None:
+    response = await client.post(
+        "/api/v1/internal/admin/sources/01a06530-b2ef-7617-b74e-c22c6e4053fa/domains",
+        json={"approved_domains": ["mastersportal.com"]},
+        headers=AUTH,
+    )
+    assert response.status_code == 404

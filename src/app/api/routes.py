@@ -52,7 +52,12 @@ from app.api.scholarship_admin_schemas import (
     ScholarshipAdminRead,
     ScholarshipCycleAdminRead,
 )
-from app.api.source_schemas import SourceCreateRequest, SourceListResponse, SourceRead
+from app.api.source_schemas import (
+    SourceCreateRequest,
+    SourceListResponse,
+    SourceRead,
+    SourceUpdateDomainsRequest,
+)
 from app.core.config import Settings, get_settings
 from app.core.cursors import decode_cursor, encode_cursor
 from app.core.ids import new_uuid7
@@ -98,7 +103,7 @@ from app.infra.sessions import (
     get_or_create_session,
     record_search_response,
 )
-from app.infra.sources import create_source, deactivate_source, list_sources
+from app.infra.sources import create_source, deactivate_source, list_sources, update_source_domains
 from app.infra.withdrawals import withdraw_scholarship
 from app.infra.worker import execute_due_jobs, execute_job
 
@@ -195,6 +200,24 @@ async def deactivate_source_route(
     """Stop a source - test data, a retired feed - from being crawled again."""
     try:
         source = await deactivate_source(db, source_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _source_read(source)
+
+
+@router.post(
+    "/internal/admin/sources/{source_id}/domains",
+    response_model=SourceRead,
+    dependencies=[Depends(require_internal_service)],
+)
+async def update_source_domains_route(
+    source_id: uuid.UUID, payload: SourceUpdateDomainsRequest, db: AsyncSession = Depends(get_db)
+) -> SourceRead:
+    """Replace a source's approved-domain allowlist - e.g. correcting one
+    that turns out to point at a different real domain than assumed when
+    the source was first registered."""
+    try:
+        source = await update_source_domains(db, source_id, payload.approved_domains)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _source_read(source)
