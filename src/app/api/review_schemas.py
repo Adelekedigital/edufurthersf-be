@@ -154,6 +154,42 @@ class PublishCycleRequest(BaseModel):
     funding_type: str | None = Field(default=None, max_length=30)
 
 
+class UpdateCycleRequest(BaseModel):
+    """Corrections to one already-published cycle.
+
+    Every field is optional and only what is sent is changed - a reviewer
+    fixing a deadline should not have to restate the destinations to avoid
+    clearing them. Omitting a field leaves it alone; sending ``null`` for a
+    nullable one clears it. The two are told apart by what the caller
+    actually set rather than by the value, so ``"deadline_at": null`` really
+    does remove a deadline.
+
+    Constraints mirror ``PublishCycleRequest`` wherever a field is supplied:
+    an edit must not be able to write a cycle a publish would have refused.
+    """
+
+    provider_cycle_key: str | None = Field(default=None, min_length=1, max_length=255)
+    applicant_segment: str | None = Field(default=None, min_length=1, max_length=255)
+    official_cycle_url: HttpUrl | None = None
+    public_status: Literal["open_verified", "expected_to_reopen", "status_unknown"] | None = None
+    status_valid_until: datetime | None = None
+    last_verified_at: datetime | None = None
+    destinations: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    levels: list[str] | None = Field(default=None, min_length=1, max_length=10)
+    origin_mode: Literal["restricted", "unrestricted", "unknown"] | None = None
+    origins: list[str] | None = Field(default=None, max_length=250)
+    field_mode: Literal["restricted", "all", "unknown"] | None = None
+    fields: list[str] | None = Field(default=None, max_length=50)
+    programme_names: list[str] | None = Field(default=None, max_length=20)
+    evidence_fresh: bool | None = None
+    deadline_at: datetime | None = None
+    deadline_precision: Literal["date", "datetime"] | None = None
+    deadline_timezone: str | None = None
+    eligibility_note: str | None = Field(default=None, max_length=1000)
+    expected_reopen_month: int | None = Field(default=None, ge=1, le=12)
+    funding_type: str | None = Field(default=None, max_length=30)
+
+
 class PublishCycleResponse(BaseModel):
     scholarship_id: uuid.UUID
     cycle_id: uuid.UUID

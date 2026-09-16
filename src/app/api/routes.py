@@ -34,6 +34,7 @@ from app.api.review_schemas import (
     ReviewQueueResponse,
     ReviewTaskSummary,
     RunDueJobsResponse,
+    UpdateCycleRequest,
     WithdrawRequest,
     WithdrawResponse,
 )
@@ -79,7 +80,7 @@ from app.domain.models import (
     Source,
     SourcePage,
 )
-from app.domain.publication import build_cycle_facts
+from app.domain.publication import build_cycle_facts, cycle_facts_to_inputs
 from app.domain.return_urls import is_allowed_return_url
 from app.domain.snapshots import build_result_snapshot
 from app.domain.status import evaluate_public_status, evaluate_status_detail
@@ -92,7 +93,7 @@ from app.infra.jobs import count_due_jobs, enqueue_job
 from app.infra.match_explanations import get_match_explanation
 from app.infra.outbox import enqueue_analytics_event
 from app.infra.providers import create_provider, list_providers
-from app.infra.publication import publish_cycle
+from app.infra.publication import load_cycle_for_update, publish_cycle, update_cycle
 from app.infra.qstash import ALLOWED_JOB_KINDS, QStashVerificationConfig, QStashVerifier
 from app.infra.reviews import decide_review
 from app.infra.scholarship_admin import search_scholarships
@@ -915,6 +916,105 @@ async def publish(
         cycle_id=cycle.cycle_id,
         lifecycle_state=RecordState.published.value,
         public_status=cycle.public_status.value,
+    )
+
+
+#: Fields of UpdateCycleRequest that live in the `facts` JSONB rather than in
+#: a column of their own, and so are merged into the reconstructed inputs
+#: before revalidation.
+_CYCLE_FACT_FIELDS = frozenset(
+    {
+        "destinations",
+        "levels",
+        "origin_mode",
+        "origins",
+        "field_mode",
+        "fields",
+        "programme_names",
+        "evidence_fresh",
+        "deadline_at",
+        "deadline_precision",
+        "deadline_timezone",
+        "eligibility_note",
+        "expected_reopen_month",
+        "funding_type",
+    }
+)
+
+
+@router.patch(
+    "/internal/admin/scholarships/{scholarship_id}/cycles/{cycle_id}",
+    response_model=PublishCycleResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+async def update_cycle_route(
+    scholarship_id: uuid.UUID,
+    cycle_id: uuid.UUID,
+    payload: UpdateCycleRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PublishCycleResponse:
+    """Correct one already-published cycle in place.
+
+    A partial update: only the fields sent are changed. The rest of the cycle
+    is read back out of storage and re-validated with it through the same
+    `build_cycle_facts` a publish goes through, because `origin_mode`/
+    `origins` and `field_mode`/`fields` constrain each other - a change to
+    one is only valid against the current value of the other, and an edit
+    must not be able to write facts a publish would have refused.
+
+    Status codes match publish: a malformed request (unknown country, degree
+    or field, an empty restricted list, an unparseable stored deadline) is a
+    422, and a conflict with the record's current state (withdrawn, or a
+    rename onto an existing cycle key) is a 409.
+    """
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    try:
+        cycle = await load_cycle_for_update(db, scholarship_id, cycle_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    countries = await load_vocabulary(db)
+    try:
+        inputs = cycle_facts_to_inputs(cycle.facts or {})
+        inputs.update({key: value for key, value in changes.items() if key in _CYCLE_FACT_FIELDS})
+        facts = build_cycle_facts(**inputs, countries=countries)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    url = changes.get("official_cycle_url", cycle.official_cycle_url)
+    status = changes.get("public_status")
+    try:
+        updated = await update_cycle(
+            db,
+            cycle,
+            provider_cycle_key=changes.get("provider_cycle_key", cycle.provider_cycle_key),
+            applicant_segment=changes.get("applicant_segment", cycle.applicant_segment),
+            official_cycle_url=str(url),
+            public_status=PublicStatus(status) if status else cycle.public_status,
+            facts=facts,
+            status_valid_until=changes.get("status_valid_until", cycle.status_valid_until),
+            last_verified_at=changes.get("last_verified_at", cycle.last_verified_at),
+            changed_fields=list(changes),
+            actor="internal_service",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.warning(
+        "scholarship_cycle_updated",
+        extra={"request_id": getattr(request.state, "request_id", "")},
+    )
+    return PublishCycleResponse(
+        scholarship_id=scholarship_id,
+        cycle_id=updated.cycle_id,
+        lifecycle_state=RecordState.published.value,
+        public_status=updated.public_status.value,
     )
 
 
