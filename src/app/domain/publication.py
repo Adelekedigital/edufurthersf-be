@@ -8,6 +8,7 @@ or everything at read time.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -111,3 +112,53 @@ def build_cycle_facts(
         if deadline_timezone is not None:
             facts["deadline_timezone"] = deadline_timezone
     return facts
+
+
+def cycle_facts_to_inputs(facts: Mapping[str, Any]) -> dict[str, Any]:
+    """Read a stored `facts` blob back into the inputs `build_cycle_facts` takes.
+
+    Editing one published cycle has to re-validate the whole of it, not just
+    the part that changed: `origin_mode`/`origins` and `field_mode`/`fields`
+    constrain each other, so a change to either is only valid against the
+    current value of the other. Reconstructing the inputs and re-running the
+    same builder keeps one validation path for publishing and editing, rather
+    than a second, weaker one that could let an edit write facts a publish
+    would have refused.
+
+    `field_names` is deliberately not reconstructed: it is derived from
+    `fields` on the way in, so returning it would feed a generated value back
+    as if a reviewer had supplied it.
+    """
+    deadline_at = facts.get("deadline_at")
+    parsed_deadline: datetime | None = None
+    if isinstance(deadline_at, str) and deadline_at:
+        try:
+            parsed_deadline = datetime.fromisoformat(deadline_at)
+        except ValueError:
+            # A blob written before this shape settled, or by hand. Dropping
+            # the deadline silently would quietly widen a cycle's window, so
+            # refuse and let the caller surface it.
+            raise ValueError(
+                f"Stored deadline_at {deadline_at!r} is not a valid timestamp"
+            ) from None
+
+    def string_list(key: str) -> list[str]:
+        value = facts.get(key)
+        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    return {
+        "destinations": string_list("destinations"),
+        "levels": string_list("levels"),
+        "origin_mode": facts.get("origin_mode", "unknown"),
+        "origins": string_list("origins"),
+        "field_mode": facts.get("field_mode", "unknown"),
+        "fields": string_list("fields"),
+        "evidence_fresh": bool(facts.get("evidence_fresh", False)),
+        "deadline_at": parsed_deadline,
+        "deadline_precision": facts.get("deadline_precision", "date"),
+        "deadline_timezone": facts.get("deadline_timezone"),
+        "eligibility_note": facts.get("eligibility_note"),
+        "expected_reopen_month": facts.get("expected_reopen_month"),
+        "programme_names": string_list("programme_names"),
+        "funding_type": facts.get("funding_type"),
+    }
