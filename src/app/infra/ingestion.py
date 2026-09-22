@@ -179,7 +179,17 @@ async def import_feed_records(db: AsyncSession, records: list[FeedRecord]) -> Im
 
             head = await db.scalar(
                 select(Discovery)
-                .where(Discovery.source_page_id == page.page_id)
+                .where(
+                    Discovery.source_page_id == page.page_id,
+                    # Split children share their parent's page when the list
+                    # item had no link of its own, and they are newer than
+                    # the page discovery. Without this, a re-crawl of the
+                    # page records its new revision as superseding
+                    # *candidate #10* rather than the page - the same
+                    # lineage corruption the Agent's own submission path
+                    # takes care to avoid, reintroduced from the read side.
+                    Discovery.split_from_discovery_id.is_(None),
+                )
                 .order_by(Discovery.created_at.desc())
                 .limit(1)
             )

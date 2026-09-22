@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -40,7 +41,14 @@ def problem(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    errors = {"fields": exc.errors()}
+    # jsonable_encoder, because pydantic puts the original exception object
+    # in ctx["error"] for any validator that raises ValueError - and an
+    # exception is not JSON-serializable. Without this the handler itself
+    # raises while rendering the 422 and the caller gets a 500 with a
+    # stack trace instead of the field errors. It stayed hidden while no
+    # request model used a custom validator; the first one that did turned
+    # every invalid request on that route into a 500.
+    errors = {"fields": jsonable_encoder(exc.errors())}
     return problem(
         request,
         status=422,

@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.agent_routes import router as agent_router
 from app.api.routes import database_ready, router
 from app.core.config import get_settings
 from app.core.errors import http_exception_handler, problem, validation_exception_handler
@@ -34,6 +35,9 @@ app = FastAPI(
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
 app.include_router(router, prefix="/api/v1")
+# Its own router, and its own credential: the Agent proposes candidates and
+# evidence, and must not reach the admin routes that decide and publish.
+app.include_router(agent_router, prefix="/api/v1")
 
 
 @app.middleware("http")
