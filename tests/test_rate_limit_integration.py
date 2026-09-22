@@ -33,7 +33,6 @@ def _reset_rate_limiters():
     join_limiter._requests.clear()
 
 
-@pytest.mark.anyio
 async def test_search_rate_limit_returns_a_specific_code_and_retry_after(db, client) -> None:
     limit = get_settings().api_rate_limit_per_minute
     for _ in range(limit):

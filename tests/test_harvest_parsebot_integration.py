@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
 from sqlalchemy import select
 
 from app.domain.models import Discovery, Source
@@ -29,7 +28,6 @@ from tests.conftest import requires_db
 pytestmark = requires_db
 
 
-@pytest.mark.anyio
 async def test_harvest_is_a_no_op_with_no_active_source(db) -> None:
     # No ScholarshipPortal/PhDScanner Source registered in this clean test
     # database - _harvest_parsebot must return cleanly without ever
