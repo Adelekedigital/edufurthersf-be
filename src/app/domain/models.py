@@ -308,6 +308,16 @@ class Discovery(TimestampMixin, Base):
     duplicate_of_discovery_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("discoveries.discovery_id"), nullable=True
     )
+    # Set when this discovery was extracted as one item from a list or blog
+    # page. A third relationship on purpose: supersedes_discovery_id means "a
+    # re-crawl of this page changed", duplicate_of_discovery_id means "the
+    # same award reported by another source", and ten awards split out of one
+    # blog post are neither - they are siblings of each other and children of
+    # the page. Chaining them through supersedes would turn ten distinct
+    # awards into ten revisions of one.
+    split_from_discovery_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("discoveries.discovery_id"), nullable=True
+    )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Set once `auto_approve_sweep` has evaluated this discovery, pass or
     #: fail - a single evaluation, ever, not a periodic re-check. Prevents
@@ -636,3 +646,96 @@ class MatchExplanation(TimestampMixin, Base):
     profile_digest: Mapped[str] = mapped_column(String(64))
     facts_digest: Mapped[str] = mapped_column(String(64))
     explanation: Mapped[str] = mapped_column(Text)
+
+
+class DiscoveryEvidence(TimestampMixin, Base):
+    """Claim-level provenance: why we believe one specific fact.
+
+    Distinct from `DiscoveryVerification`, which records one fetch of one
+    page. That answers "did we really look?"; this answers "which sentence,
+    on which page, fetched how, supports this deadline?" - the question a
+    reviewer actually has, and the one an auto-approval audit has to be able
+    to reconstruct after the fact.
+
+    `source_type` is load-bearing rather than descriptive. An aggregator, a
+    marketplace listing, a blog roundup and a search result may all support
+    discovery, but none of them is equivalent to the official page, and
+    flattening them into "a URL" is what lets a list page end up standing as
+    proof of every scholarship on it.
+    """
+
+    __tablename__ = "discovery_evidence"
+    __table_args__ = (
+        # A database guarantee, not a code-level check: evidence submission
+        # is at-least-once like every other path here, and a resubmitted run
+        # must not double its own evidence.
+        UniqueConstraint(
+            "discovery_id",
+            "claim_path",
+            "source_url",
+            "workflow_run_id",
+            name="uq_discovery_evidence_claim",
+        ),
+        Index("ix_discovery_evidence_discovery_id", "discovery_id"),
+    )
+
+    evidence_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    discovery_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("discoveries.discovery_id", ondelete="CASCADE")
+    )
+    claim_path: Mapped[str] = mapped_column(String(255))
+    asserted_value: Mapped[dict | None] = mapped_column("value", JSONB, nullable=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String(30))
+    excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fetch_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    workflow_run_id: Mapped[str] = mapped_column(String(128))
+    workflow_version: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
+class AgentRun(TimestampMixin, Base):
+    """One Agent workflow run over one discovery.
+
+    The versioned run identity `auto_review_evaluated_at` could not provide.
+    That marker is a single boolean moment - right for a fixed gate, wrong
+    for a workflow that will change - so a changed prompt or policy had no
+    way to reprocess a record on purpose without looking like a duplicate.
+    Uniqueness on (discovery_id, workflow_version) makes re-running one
+    version idempotent and a new version a genuinely new run.
+
+    `agent_outcome` is recorded, never acted on. AUTO_CHECK_ELIGIBLE is an
+    input to this service's existing approval gates, not a publication
+    command, and nothing in `auto_approval.py` reads this table.
+    """
+
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "discovery_id", "workflow_version", name="uq_agent_runs_discovery_workflow"
+        ),
+        Index("ix_agent_runs_discovery_id", "discovery_id"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=new_uuid7
+    )
+    discovery_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("discoveries.discovery_id", ondelete="CASCADE")
+    )
+    workflow_version: Mapped[str] = mapped_column(String(64))
+    agent_outcome: Mapped[str] = mapped_column(String(32))
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    #: Kept out of ReviewTask.draft_recommendation on purpose - the same
+    #: separate-provenance reasoning as ai_extracted_facts versus
+    #: extracted_facts. A reviewer should be able to weigh the deterministic
+    #: draft and the Agent's proposal independently, not be handed one
+    #: merged opinion with no way to tell which part came from where.
+    recommendation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

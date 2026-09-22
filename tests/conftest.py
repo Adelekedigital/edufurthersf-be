@@ -43,6 +43,9 @@ def _configure_environment(database_url: str) -> None:
     os.environ.setdefault("CORE_SERVICE_TOKEN", "core-service-token")
     os.environ.setdefault("CORE_ALLOWED_RETURN_URL_PREFIX", "https://app.test/")
     os.environ.setdefault("INTERNAL_SERVICE_TOKEN", "internal-service-token")
+    # Deliberately different from the admin token: the tests assert that
+    # neither credential opens the other surface.
+    os.environ.setdefault("AGENT_SERVICE_TOKEN", "agent-service-token")
     from app.core.config import get_settings
 
     get_settings.cache_clear()
@@ -75,7 +78,7 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
                 "scholarship_revisions, scholarships, providers, processing_jobs, "
                 "review_tasks, discoveries, discovery_quarantine, crawl_runs, "
                 "source_snapshots, source_pages, sources, discovery_verifications, "
-                "auto_approval_audits, "
+                "auto_approval_audits, discovery_evidence, agent_runs, "
                 "outbox_events, consumer_receipts, audit_log, verifications, countries, "
                 "verification_evidence, research_provider_usage RESTART IDENTITY CASCADE"
             )

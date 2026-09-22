@@ -16,6 +16,24 @@ async def load_siblings(db: AsyncSession, discovery: Discovery) -> list[SiblingF
     regardless of which one `link_discovery` picked as "the original" - the
     match is a star (one original, N duplicates all pointing at it directly),
     so this is the only way to see every source that reported the identity.
+
+    Agent-authored rows are excluded. A discovery with
+    `split_from_discovery_id` set was created by the Agent platform from a
+    list page, and both halves of what corroboration measures come from the
+    Agent: the title it supplies becomes the identity key that makes it a
+    sibling at all, and the excerpt it supplies becomes the
+    `extracted_facts` that decide whether the amount and deadline agree.
+
+    Counting those would let the Agent manufacture the second independent
+    source that `auto_approve_min_corroboration_sources` requires - turning
+    "the Agent proposes, it never decides" into a guarantee that holds only
+    while AUTO_APPROVE_ENABLED is false. Corroboration exists to ask whether
+    somebody *else* reported the same award; an Agent-derived row is not
+    somebody else.
+
+    It still gets a review task and a human decision like any other
+    discovery. This narrows one input to the automated publish gate, not
+    the record's standing.
     """
     if not discovery.normalized_identity_key:
         return []
@@ -26,6 +44,7 @@ async def load_siblings(db: AsyncSession, discovery: Discovery) -> list[SiblingF
         .where(
             Discovery.normalized_identity_key == discovery.normalized_identity_key,
             Discovery.discovery_id != discovery.discovery_id,
+            Discovery.split_from_discovery_id.is_(None),
         )
     )
     return [(row[0], row[1], row[2]) for row in rows.all()]

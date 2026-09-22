@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     db_connect_timeout_seconds: float = 3.0
     api_rate_limit_per_minute: int = 30
     internal_service_token: str | None = None
+    #: Separate from internal_service_token on purpose. That one opens the
+    #: whole admin surface - publish, withdraw, decide reviews. The Agent
+    #: proposes candidates and evidence and must not be able to do any of
+    #: that, so it gets its own credential scoped to /internal/agent/*.
+    #: Rotating one must not force rotating the other.
+    agent_service_token: str | None = None
     qstash_current_signing_key: str | None = None
     qstash_next_signing_key: str | None = None
     qstash_token: str | None = None
@@ -150,6 +156,27 @@ class Settings(BaseSettings):
                     "cursor_secret_is_the_development_placeholder",
                     extra={"reason": "set CURSOR_SECRET to a unique random value"},
                 )
+        return self
+
+    @model_validator(mode="after")
+    def require_distinct_service_tokens(self) -> Settings:
+        """The admin and Agent credentials must not be the same secret.
+
+        Both arrive in the same `X-Service-Token` header, which makes
+        setting them to one value an easy and completely silent mistake:
+        every route keeps working, every test passes, and the privilege
+        separation the Agent surface depends on is simply gone.
+        """
+        if (
+            self.internal_service_token
+            and self.agent_service_token
+            and self.internal_service_token == self.agent_service_token
+        ):
+            raise ValueError(
+                "AGENT_SERVICE_TOKEN must differ from INTERNAL_SERVICE_TOKEN; "
+                "sharing one value removes the privilege separation between "
+                "the admin surface and the Agent surface"
+            )
         return self
 
     @property
