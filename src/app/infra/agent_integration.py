@@ -417,5 +417,8 @@ async def record_run(db: AsyncSession, payload: AgentRunRequest) -> AgentRun:
     run_id = (await db.execute(statement)).scalar_one()
     await db.commit()
     run = await db.get(AgentRun, run_id)
-    assert run is not None
+    if run is None:  # pragma: no cover - the row was committed immediately above
+        # Not an assert: those are stripped under -O, which would turn this
+        # into a silent None flowing back to the caller as a valid run.
+        raise RuntimeError(f"agent_run {run_id} disappeared immediately after upsert")
     return run
