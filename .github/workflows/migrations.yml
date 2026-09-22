@@ -4,12 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       environment:
+        # Only staging. The `production` GitHub Environment exists but has
+        # never had a DATABASE_URL set, so choosing it failed at engine
+        # construction with "Could not parse SQLAlchemy URL" - after the
+        # operator had already decided to migrate production. Offering a
+        # target that cannot work is worse than not offering it: the
+        # deployed database this workflow actually migrates is staging's.
         description: GitHub Environment whose DATABASE_URL should be migrated
         required: true
         type: choice
         options:
           - staging
-          - production
 
 permissions:
   contents: read
