@@ -1,8 +1,12 @@
 name: Quality gate
 
 on:
-  push:
   pull_request:
+  # Only main. A bare `push:` also fires on the branch behind a pull
+  # request, so every PR runs the whole gate twice against the same commit
+  # - double the minutes, and two results to reconcile when they disagree.
+  push:
+    branches: [main]
 
 jobs:
   quality:
